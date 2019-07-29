@@ -1,0 +1,51 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <Version>0.0.1</Version>
+    <PackageId>Zanaptak.TypedCssClasses</PackageId>
+    <Authors>zanaptak</Authors>
+    <Product>Zanaptak.TypedCssClasses</Product>
+    <PackageTags>f#;fsharp;css</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Description>A CSS class type provider for F# web development.</Description>
+    <AssemblyName>Zanaptak.TypedCssClasses</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <DefineConstants>TRACE;LOGGING_ENABLED;TIMESTAMPS_IN_LOG</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="vendor\FSharp.TypeProviders.SDK\LICENSE.md" />
+    <Compile Include="vendor\FSharp.TypeProviders.SDK\ProvidedTypes.fsi" />
+    <Compile Include="vendor\FSharp.TypeProviders.SDK\ProvidedTypes.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="vendor\FSharp.Data\LICENSE.md" />
+    <Compile Include="vendor\FSharp.Data\Http.fs" />
+    <Compile Include="vendor\FSharp.Data\IO.fs" />
+    <Compile Include="vendor\FSharp.Data\Caching.fs" />
+    <Compile Include="vendor\FSharp.Data\TextConversions.fs" />
+    <Compile Include="vendor\FSharp.Data\TextRuntime.fs" />
+    <Compile Include="vendor\FSharp.Data\Pluralizer.fs" />
+    <Compile Include="vendor\FSharp.Data\NameUtils.fs" />
+    <Compile Include="vendor\FSharp.Data\StructuralTypes.fs" />
+    <Compile Include="vendor\FSharp.Data\StructuralInference.fs" />
+    <Compile Include="vendor\FSharp.Data\QuotationBuilder.fs" />
+    <Compile Include="vendor\FSharp.Data\AssemblyResolver.fs" />
+    <Compile Include="vendor\FSharp.Data\Helpers.fs" />
+    <Compile Include="vendor\FSharp.Data\ConversionsGenerator.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="vendor\README.md" />
+    <Compile Include="CssClassesTypeProvider.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Update="FSharp.Core" Version="4.3.4" />
+  </ItemGroup>
+
+</Project>
