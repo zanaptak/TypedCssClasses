@@ -8,7 +8,7 @@ Bring external stylesheet classes into your F# code as design-time discoverable 
 
 ## Examples
 
-The following examples are shown using Fable.React view syntax.
+The following examples are using Fable.React view syntax.
 
 ### Bootstrap CSS
 
@@ -67,7 +67,7 @@ This type provider has been primarily developed and tested with Fable, but since
 
 It is tested and working in Visual Studio Code on Windows and Linux, and in Visual Studio 2019 on Windows.
 
-Add the package to your project:
+Add the [NuGet package](https://www.nuget.org/packages/Zanaptak.TypedCssClasses) to your project:
 ```
 dotnet add package Zanaptak.TypedCssClasses
 ```
@@ -80,10 +80,10 @@ open Zanaptak.TypedCssClasses
 
 // Define a type for a CSS source.
 // Can be file path, web URL, or CSS text.
-type css = CssClasses<"my-css-file.css">
+type css = CssClasses<"https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
 
 // Enjoy your typed properties!
-css.``some-css-class``
+let x = css.``display-1``
 ```
 
 ## Parameters
