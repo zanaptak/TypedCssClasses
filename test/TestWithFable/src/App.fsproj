@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="App.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Fable.Core" Version="3.0.0" />
+    <PackageReference Include="Fable.Elmish.React" Version="3.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Zanaptak.TypedCssClasses">
+      <HintPath>..\..\..\src\bin\Debug\netstandard2.0\Zanaptak.TypedCssClasses.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

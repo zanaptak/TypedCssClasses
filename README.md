@@ -8,7 +8,7 @@ Bring external stylesheet classes into your F# code as design-time discoverable 
 
 ## Examples
 
-The following examples are using Fable.React view syntax.
+The following examples are using [Fable.React](https://fable.io/blog/Announcing-Fable-React-5.html) view syntax, but any other web framework should work as well since the provided properties compile to strings.
 
 ### Bootstrap CSS
 
@@ -57,15 +57,11 @@ div [ ClassName <| String.concat " " [
 ] [ str "Resize me! Hover me!" ]
 ```
 
-#### CSS Bundle Size
+#### CSS bundle size
 
-When using a custom-generated Tailwind CSS file in your local build process, the Tailwind documentation recommends using Purgecss to reduce your CSS bundle size. With the `Naming.Verbatim` option, that technique will work with this library as well. Just point Purgecss at your *.fs view files, and it will identify the classes you are actually using and remove unused classes from the final bundle.
+When using a custom-generated Tailwind CSS file in your local build process, the [Tailwind documentation](https://tailwindcss.com/docs/controlling-file-size) recommends using Purgecss to reduce your CSS bundle size. With the `Naming.Verbatim` option, that technique will work with this library as well. Just point Purgecss at your *.fs view files, and it will identify the classes you are actually using and remove unused classes from the final bundle.
 
 ## Getting started
-
-This type provider has been primarily developed and tested with Fable, but since the provided class name properties are simply strings, they should work with any web framework.
-
-It is tested and working in Visual Studio Code on Windows and Linux, and in Visual Studio 2019 on Windows.
 
 Add the [NuGet package](https://www.nuget.org/packages/Zanaptak.TypedCssClasses) to your project:
 ```
@@ -86,6 +82,8 @@ type css = CssClasses<"https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bo
 let x = css.``display-1``
 ```
 
+The design-time capability is known to work with Visual Studio Code (with Ionide-fsharp extension) on Windows and Linux, and Visual Studio 2019 on Windows. (Other environments/IDEs have not been tested by me.)
+
 ## Parameters
 
 ### source
@@ -103,7 +101,7 @@ Verbatim is the default naming strategy to avoid the small chance of name collis
 
 ### resolutionFolder
 
-A custom folder to use for resolving relative file paths.
+A custom folder to use for resolving relative file paths. (Default is the project root folder.)
 
 ## Notes
 

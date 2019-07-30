@@ -222,7 +222,7 @@ module internal ProviderHelpers =
 
             try
                 let parseResult =
-                  using (IO.logTime "ParseSampleText" "") <| fun _ ->
+                  //using (IO.logTime "ParseSampleText" "") <| fun _ ->
                   { Spec = parseFunc "" valueToBeParsedOrItsUri
                     IsUri = false
                     IsResource = false }
@@ -236,6 +236,11 @@ module internal ProviderHelpers =
                 { ResolutionType = DesignTime
                   DefaultResolutionFolder = cfg.ResolutionFolder
                   ResolutionFolder = resolutionFolder }
+
+            //log ( sprintf "Resolving source" )
+            //log ( sprintf "DefaultResolutionFolder = %s" resolver.DefaultResolutionFolder )
+            //log ( sprintf "ResolutionFolder = %s" resolver.ResolutionFolder )
+            //log ( sprintf "CurrentDirectory = %s" Environment.CurrentDirectory )
 
             let readText() =
                 let reader, toWatch = asyncRead resolver formatName encodingStr uri
@@ -260,7 +265,7 @@ module internal ProviderHelpers =
             try
 
                 let sample =
-                    using (IO.logTime "GetTextFromUri" "") <| fun _ ->
+                    //using (IO.logTime "GetTextFromUri" "") <| fun _ ->
                     if isWeb uri then
                         let text =
                             match webUrisCache.TryRetrieve(uri.OriginalString) with
@@ -278,7 +283,7 @@ module internal ProviderHelpers =
                         readText()
 
                 let parseResult =
-                  using (IO.logTime "ParseTextFromUri" "") <| fun _ ->
+                  //using (IO.logTime "ParseTextFromUri" "") <| fun _ ->
                   { Spec = parseFunc (Path.GetExtension uri.OriginalString) sample
                     IsUri = true
                     IsResource = false }
@@ -291,7 +296,7 @@ module internal ProviderHelpers =
                     // even if it's a valid uri, it could be sample text
                     try
                         let parseResult =
-                          using (IO.logTime "ParseSampleText" "") <| fun _ ->
+                          //using (IO.logTime "ParseSampleText" "") <| fun _ ->
                           { Spec = parseFunc "" valueToBeParsedOrItsUri
                             IsUri = false
                             IsResource = false }
@@ -309,7 +314,7 @@ module internal ProviderHelpers =
     // Also cache temporarily during partial invalidation since the invalidation of one TP always causes invalidation of all TPs
     let internal getOrCreateProvidedType (cfg: TypeProviderConfig) (tp:DisposableTypeProviderForNamespaces) (fullTypeName:string) f =
 
-        using (logTime "GeneratingProvidedType" (sprintf "%s [%d]" fullTypeName tp.Id)) <| fun _ ->
+        //using (logTime "GeneratingProvidedType" (sprintf "%s [%d]" fullTypeName tp.Id)) <| fun _ ->
 
         let fullKey = (fullTypeName, cfg.RuntimeAssembly, cfg.ResolutionFolder, cfg.SystemRuntimeAssemblyVersion)
 
@@ -409,7 +414,7 @@ module internal ProviderHelpers =
         let resultType = spec.RepresentationType
         let resultTypeAsync = typedefof<Async<_>>.MakeGenericType(resultType)
 
-        using (logTime "CommonTypeGeneration" valueToBeParsedOrItsUri) <| fun _ ->
+        //using (logTime "CommonTypeGeneration" valueToBeParsedOrItsUri) <| fun _ ->
 
         [ // Generate static Parse method
           let args = [ ProvidedParameter("text", typeof<string>) ]
