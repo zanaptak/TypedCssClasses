@@ -7,7 +7,7 @@
 //
 // Utilities for building F# quotations without quotation literals
 
-module Zanaptak.TypedCssClasses.Internal.ProviderImplementation.QuotationBuilder
+module internal Zanaptak.TypedCssClasses.Internal.ProviderImplementation.QuotationBuilder
 
 open System
 open System.Reflection

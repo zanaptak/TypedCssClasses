@@ -41,7 +41,7 @@ module private Helpers =
 // --------------------------------------------------------------------------------------
 
 /// Conversions from string to string/int/int64/decimal/float/boolean/datetime/timespan/guid options
-type TextConversions private() =
+type internal TextConversions private() =
 
   /// `NaN` `NA` `N/A` `#N/A` `:` `-` `TBA` `TBD`
   static member val DefaultMissingValues = [| "NaN"; "NA"; "N/A"; "#N/A"; ":"; "-"; "TBA"; "TBD" |]

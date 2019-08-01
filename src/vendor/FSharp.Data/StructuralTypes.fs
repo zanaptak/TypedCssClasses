@@ -12,7 +12,7 @@ open Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime
 // --------------------------------------------------------------------------------------
 
 /// A property of a record has a name and type and may be optional
-type InferedProperty =
+type internal InferedProperty =
   { Name : string
     mutable Type : InferedType }
   override x.ToString() = sprintf "%A" x
@@ -20,14 +20,14 @@ type InferedProperty =
 /// For heterogeneous types (types that have multiple possible forms
 /// such as differently named XML nodes or records and arrays mixed together)
 /// this type represents the number of occurrences of individual forms
-and InferedMultiplicity =
+and internal InferedMultiplicity =
   | Single
   | OptionalSingle
   | Multiple
 
 /// For heterogeneous types, this represents the tag that defines the form
 /// (that is either primitive type, collection, named record etc.)
-and [<RequireQualifiedAccess>] InferedTypeTag =
+and [<RequireQualifiedAccess>] internal InferedTypeTag =
   // Unknown type
   | Null
   // Primitive types
@@ -58,7 +58,7 @@ and [<RequireQualifiedAccess>] InferedTypeTag =
 /// Why is collection not simply a list of Heterogeneous types? If we used that
 /// we would lose information about multiplicity and so we would not be able
 /// to generate nicer types!
-and [<CustomEquality; NoComparison; RequireQualifiedAccess>] InferedType =
+and [<CustomEquality; NoComparison; RequireQualifiedAccess>] internal InferedType =
   | Primitive of typ:Type * unit:option<System.Type> * optional:bool
   | Record of name:string option * fields:InferedProperty list * optional:bool
   | Json of typ:InferedType * optional:bool
@@ -118,7 +118,7 @@ and [<CustomEquality; NoComparison; RequireQualifiedAccess>] InferedType =
 // ------------------------------------------------------------------------------------------------
 // Additional operations for working with the inferred representation
 
-type InferedTypeTag with
+type internal InferedTypeTag with
   member x.NiceName =
     match x with
     | Null -> failwith "Null nodes should be skipped"
@@ -159,22 +159,22 @@ type InferedTypeTag with
 
 /// Dummy type to represent that only "0" was found.
 /// Will be generated as 'int', unless it's converted to Bit.
-type Bit0 = Bit0
+type internal Bit0 = Bit0
 
 /// Dummy type to represent that only "1" was found
 /// Will be generated as 'int', unless it's converted to Bit
-type Bit1 = Bit1
+type internal Bit1 = Bit1
 
 /// Dummy type to represent that only one of "0" and "1" were found
 /// Will be generated as a 'bool', unless it's converted to another numerical type
-type Bit = Bit
+type internal Bit = Bit
 
 // ------------------------------------------------------------------------------------------------
 
 /// Represents type information about a primitive property (used mainly in the CSV provider)
 /// This type captures the type, unit of measure and handling of missing values (if we
 /// infer that the value may be missing, we can generate option<T> or nullable<T>)
-type PrimitiveInferedProperty =
+type internal PrimitiveInferedProperty =
   { Name : string
     InferedType : Type
     RuntimeType : Type
@@ -196,7 +196,7 @@ type PrimitiveInferedProperty =
 and
     [<RequireQualifiedAccess>]
     /// Represents a transformation of a type
-    TypeWrapper =
+    internal TypeWrapper =
     /// No transformation will be made to the type
     | None
     /// The type T will be converter to type T option

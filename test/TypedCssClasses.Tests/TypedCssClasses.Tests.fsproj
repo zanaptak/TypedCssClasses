@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netcoreapp2.2</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateProgramFile>true</GenerateProgramFile>
+    <Configurations>Debug;Release</Configurations>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="nunit" Version="3.11.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="3.11.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="15.9.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="UnitTest1.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Zanaptak.TypedCssClasses">
+      <HintPath>..\..\src\bin\TestRelease\netstandard2.0\Zanaptak.TypedCssClasses.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>

@@ -22,7 +22,7 @@ open System.Collections.ObjectModel
 [<AutoOpen>]
 module internal Reader =
 
-    type ILModuleReader = class end
+    type internal ILModuleReader = class end
 
     val GetWeakReaderCache : unit -> System.Collections.Concurrent.ConcurrentDictionary<(string * string), DateTime * WeakReference<ILModuleReader>>
     val GetStrongReaderCache : unit -> System.Collections.Concurrent.ConcurrentDictionary<(string * string), DateTime * int * ILModuleReader>
@@ -40,7 +40,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     /// Represents an erased provided parameter
     [<Class>]
-    type ProvidedParameter =
+    type internal ProvidedParameter =
         inherit ParameterInfo
 
         /// Create a new provided parameter.
@@ -60,7 +60,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     /// Represents a provided static parameter.
     [<Class>]
-    type ProvidedStaticParameter =
+    type internal ProvidedStaticParameter =
         inherit ParameterInfo
 
         /// Create a new provided static parameter, for use with DefineStaticParamaeters on a provided type definition.
@@ -75,7 +75,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     /// Represents an erased provided constructor.
     [<Class>]
-    type ProvidedConstructor =
+    type internal ProvidedConstructor =
         inherit ConstructorInfo
 
         /// When making a cross-targeting type provider, use this method instead of the ProvidedConstructor constructor from ProvidedTypes
@@ -112,7 +112,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
 
     [<Class>]
-    type ProvidedMethod =
+    type internal ProvidedMethod =
         inherit MethodInfo
 
         /// When making a cross-targeting type provider, use this method instead of the ProvidedMethod constructor from ProvidedTypes
@@ -151,7 +151,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     /// Represents an erased provided property.
     [<Class>]
-    type ProvidedProperty =
+    type internal ProvidedProperty =
         inherit PropertyInfo
 
         /// Create a new provided property. It is not initially associated with any specific provided type definition.
@@ -182,7 +182,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     /// Represents an erased provided property.
     [<Class>]
-    type ProvidedEvent =
+    type internal ProvidedEvent =
         inherit EventInfo
 
         /// Create a new provided event. It is not initially associated with any specific provided type definition.
@@ -207,7 +207,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     /// Represents an erased provided field.
     [<Class>]
-    type ProvidedField =
+    type internal ProvidedField =
         inherit FieldInfo
 
         /// Create a new provided field. It is not initially associated with any specific provided type definition.
@@ -239,7 +239,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
     /// See the type provider spec for the methods that must be implemented.
     /// Note that the type provider specification does not require us to implement pointer-equality for provided types.
     [<Class>]
-    type ProvidedTypeSymbol =
+    type internal ProvidedTypeSymbol =
         inherit TypeDelegator
 
         /// For example, kg
@@ -250,7 +250,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     /// Helpers to build symbolic provided types
     [<Class>]
-    type ProvidedTypeBuilder =
+    type internal ProvidedTypeBuilder =
 
         /// Like typ.MakeGenericType, but will also work with unit-annotated types
         static member MakeGenericType: genericTypeDefinition: Type * genericArguments: Type list -> Type
@@ -264,7 +264,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     /// Helps create erased provided unit-of-measure annotations.
     [<Class>]
-    type ProvidedMeasureBuilder =
+    type internal ProvidedMeasureBuilder =
 
         /// Gets the measure indicating the "1" unit of measure, that is the unitless measure.
         static member One: Type
@@ -291,7 +291,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     /// Represents a provided type definition.
     [<Class>]
-    type ProvidedTypeDefinition =
+    type internal ProvidedTypeDefinition =
         inherit TypeDelegator
 
         /// When making a cross-targeting type provider, use this method instead of the corresponding ProvidedTypeDefinition constructor from ProvidedTypes
@@ -391,7 +391,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
 #if !NO_GENERATIVE
     /// A provided generated assembly
-    type ProvidedAssembly =
+    type internal ProvidedAssembly =
 
         inherit Assembly
 
@@ -423,7 +423,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     [<Class>]
     /// Represents the context for which code is to be generated. Normally you should not need to use this directly.
-    type ProvidedTypesContext =
+    type internal ProvidedTypesContext =
 
         /// Try to find the given target assembly in the context
         member TryBindAssemblyNameToTarget: aref: AssemblyName -> Choice<Assembly, exn>

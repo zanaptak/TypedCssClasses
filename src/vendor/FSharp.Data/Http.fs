@@ -20,7 +20,7 @@ open System.Runtime.CompilerServices
 open System.Runtime.InteropServices
 
 /// The method to use in an HTTP request
-module HttpMethod =
+module internal HttpMethod =
 
     // RFC 2626 specifies 8 methods
 
@@ -65,7 +65,7 @@ module HttpMethod =
     let Patch = "PATCH"
 
 /// Headers that can be sent in an HTTP request
-module HttpRequestHeaders =
+module internal HttpRequestHeaders =
     /// Content-Types that are acceptable for the response
     let Accept (contentType:string) = "Accept", contentType
     /// Character sets that are acceptable
@@ -171,7 +171,7 @@ module HttpRequestHeaders =
     let XHTTPMethodOverride (httpMethod:string) = "X-HTTP-Method-Override", httpMethod
 
 /// Headers that can be received in an HTTP response
-module HttpResponseHeaders =
+module internal HttpResponseHeaders =
     /// Specifying which web sites can participate in cross-origin resource sharing
     let [<Literal>] AccessControlAllowOrigin = "Access-Control-Allow-Origin"
     /// What partial content range types this server supports
@@ -244,7 +244,7 @@ module HttpResponseHeaders =
     let [<Literal>] WWWAuthenticate = "WWW-Authenticate"
 
 /// Status codes that can be received in an HTTP response
-module HttpStatusCodes =
+module internal HttpStatusCodes =
     /// The server has received the request headers and the client should proceed to send the request body.
     let [<Literal>] Continue = 100
     /// The requester has asked the server to switch protocols and the server has agreed to do so.
@@ -373,10 +373,10 @@ module HttpStatusCodes =
     let [<Literal>] NetworkAuthenticationRequired = 511
 
 
-type MultipartItem = | MultipartItem of formField: string * filename: string * content: Stream
+type internal MultipartItem = | MultipartItem of formField: string * filename: string * content: Stream
 
 /// The body to send in an HTTP request
-type HttpRequestBody =
+type internal HttpRequestBody =
     | TextRequest of string
     | BinaryUpload of byte[]
     | FormValues of seq<string * string>
@@ -384,12 +384,12 @@ type HttpRequestBody =
     | Multipart of boundary: string * parts: seq<MultipartItem>
 
 /// The response body returned by an HTTP request
-type HttpResponseBody =
+type internal HttpResponseBody =
     | Text of string
     | Binary of byte[]
 
 /// The response returned by an HTTP request
-type HttpResponse =
+type internal HttpResponse =
   { Body : HttpResponseBody
     StatusCode: int
     ResponseUrl : string
@@ -398,7 +398,7 @@ type HttpResponse =
     Cookies : Map<string,string> }
 
 /// The response returned by an HTTP request with direct access to the response stream
-type HttpResponseWithStream =
+type internal HttpResponseWithStream =
   { ResponseStream : Stream
     StatusCode: int
     ResponseUrl : string
@@ -407,7 +407,7 @@ type HttpResponseWithStream =
     Cookies : Map<string,string> }
 
 /// Constants for common HTTP content types
-module HttpContentTypes =
+module internal HttpContentTypes =
     /// */*
     let [<Literal>] Any = "*/*"
     /// plain/text
@@ -449,7 +449,7 @@ module HttpContentTypes =
 
 type private HeaderEnum = System.Net.HttpRequestHeader
 
-module MimeTypes =
+module internal MimeTypes =
     open System.Collections.Generic
     let private pairs =
         [|
@@ -1056,7 +1056,7 @@ module MimeTypes =
     let tryFind (ext: string) = Map.tryFind (ext.ToLowerInvariant()) map
 
 /// Constants for common HTTP encodings
-module HttpEncodings =
+module internal HttpEncodings =
 
     /// ISO-8859-1
     let PostDefaultEncoding = Encoding.GetEncoding("ISO-8859-1") // http://stackoverflow.com/questions/708915/detecting-the-character-encoding-of-an-http-post-request/708942#708942
@@ -1484,7 +1484,7 @@ module internal CookieHandling =
 /// Utilities for working with network via HTTP. Includes methods for downloading
 /// resources with specified headers, query parameters and HTTP body
 [<AbstractClass>]
-type Http private() =
+type internal Http private() =
 
     static let charsetRegex = Regex("charset=([^;\s]*)", RegexOptions.Compiled)
 

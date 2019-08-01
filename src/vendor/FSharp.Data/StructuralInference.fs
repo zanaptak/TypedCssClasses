@@ -3,7 +3,7 @@
 //
 
 /// Implements type inference for unstructured documents like XML or JSON
-module Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime.StructuralInference
+module internal Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime.StructuralInference
 
 open System
 open System.Diagnostics

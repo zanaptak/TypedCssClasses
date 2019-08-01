@@ -3,7 +3,7 @@
 //
 
 /// Helper functions called from the generated code for working with files
-module Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime.IO
+module internal Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime.IO
 
 open System
 open System.Collections.Generic

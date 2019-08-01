@@ -3,7 +3,7 @@
 //
 
 /// Tools for generating nice member names that follow F# & .NET naming conventions
-module Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime.NameUtils
+module internal Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime.NameUtils
 
 open System
 open System.Globalization

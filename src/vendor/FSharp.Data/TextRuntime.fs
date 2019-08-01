@@ -10,7 +10,7 @@ open Zanaptak.TypedCssClasses.Internal.FSharp.Data
 open Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime
 
 /// Static helper methods called from the generated code for working with text
-type TextRuntime =
+type internal TextRuntime =
 
   [<ThreadStatic>]
   [<DefaultValue>]

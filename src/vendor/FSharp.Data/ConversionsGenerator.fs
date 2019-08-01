@@ -7,7 +7,7 @@
 //
 // Conversions from string to various primitive types
 
-module Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ConversionsGenerator
+module internal Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ConversionsGenerator
 
 open System
 open FSharp.Quotations

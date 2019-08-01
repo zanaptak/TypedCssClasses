@@ -555,8 +555,8 @@ module internal ProviderHelpers =
 
         spec.GeneratedType
 
-
+#if INTERNALS_VISIBLE
 open System.Runtime.CompilerServices
-
-[<assembly:InternalsVisibleToAttribute("Zanaptak.TypedCssClasses.Internal.FSharp.Data.DesignTime.Tests")>]
+[<assembly:InternalsVisibleTo("TypedCssClasses.Tests")>]
 do()
+#endif

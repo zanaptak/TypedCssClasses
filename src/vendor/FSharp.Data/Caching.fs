@@ -3,7 +3,7 @@
 //
 
 /// Implements caching using in-memory and local file system
-module Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime.Caching
+module internal Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime.Caching
 
 open System
 open System.Collections.Concurrent
