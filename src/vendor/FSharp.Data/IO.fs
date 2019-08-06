@@ -90,7 +90,7 @@ type private FileWatcher(path) =
         let curr = getLastWrite()
 
         if lastWrite <> curr then
-            log (sprintf "File %s: %s" action path)
+            log (sprintf "Watcher detected file %s: %s" action path)
             lastWrite <- curr
             // creating a copy since the handler can be unsubscribed during the iteration
             let handlers = subscriptions.Values |> Seq.toArray
@@ -213,7 +213,7 @@ type internal UriResolver =
               log "ResolutionType = Runtime, using appdomain base"
               AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/')
           log ( sprintf "Root path = %s" root )
-          let resolved = Uri(Path.Combine(root, uri.OriginalString), UriKind.Absolute), false
+          let resolved = Uri( Path.GetFullPath( Path.Combine(root, uri.OriginalString) ) , UriKind.Absolute), false
           log ( sprintf "Resolved path = %s" ( fst resolved ).OriginalString )
           resolved
         with

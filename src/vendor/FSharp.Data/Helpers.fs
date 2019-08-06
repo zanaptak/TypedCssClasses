@@ -333,8 +333,12 @@ module internal ProviderHelpers =
                         let tpref = WeakReference<_>(tp)
                         let invalidateAction() =
                             match tpref.TryGetTarget() with
-                            | true, tp -> tp.InvalidateOneType(fullTypeName)
-                            | _ -> ()
+                            | true, tp ->
+                              log ( sprintf "Invalidating %s" name )
+                              tp.InvalidateOneType(fullTypeName)
+                            | _ ->
+                              log "No invalidation target"
+                              ()
                         Some (watchForChanges file (name, invalidateAction))
                     | None -> None
 

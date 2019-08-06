@@ -36,10 +36,7 @@ printfn "%s" css.myClass
 let view (model:Model) dispatch =
 
   div [ ]
-      [ p [] [ str "css property = " ; str css.myClass ]
-        button [ OnClick (fun _ -> dispatch Increment) ] [ str "+" ]
-        div [] [ str (string model) ]
-        button [ OnClick (fun _ -> dispatch Decrement) ] [ str "-" ] ]
+      [ p [] [ str "css property = " ; str css.myClass ] ]
 
 // App
 Program.mkSimple init update view

@@ -57,8 +57,8 @@ module TypeProvider =
         let transformer =
           match naming with
           | Naming.Underscores -> Utils.symbolsToUnderscores
-          | Naming.CamelCase -> NameUtils.niceCamelName
-          | Naming.PascalCase -> NameUtils.nicePascalName
+          | Naming.CamelCase -> Utils.toCamelCase
+          | Naming.PascalCase -> Utils.toPascalCase
           | _ -> id
 
         let cssClasses = Utils.parseCss value transformer
@@ -69,7 +69,7 @@ module TypeProvider =
 
         cssClasses
         |> Seq.iter ( fun c ->
-          let propName , propValue = c.Property , c.Value
+          let propName , propValue = c.Name , c.Value
           let prop = ProvidedProperty( propName , typeof< string > , isStatic = true , getterCode = ( fun _ -> <@@ propValue @@> ) )
           prop.AddXmlDoc( Utils.escapeHtml propValue )
           cssType.AddMember prop

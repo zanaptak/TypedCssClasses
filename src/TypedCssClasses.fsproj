@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
-    <Version>0.0.1</Version>
+    <Version>0.0.2</Version>
     <PackageId>Zanaptak.TypedCssClasses</PackageId>
     <Authors>zanaptak</Authors>
     <Product>Zanaptak.TypedCssClasses</Product>
@@ -11,15 +11,23 @@
     <Description>A CSS class type provider for F# web development.</Description>
     <AssemblyName>Zanaptak.TypedCssClasses</AssemblyName>
     <PackageProjectUrl>https://github.com/zanaptak/TypedCssClasses</PackageProjectUrl>
-    <Configurations>Debug;Release;TestRelease</Configurations>
+    <Configurations>Debug;Release;ReleaseTest;DebugLog</Configurations>
+    <RepositoryUrl>https://github.com/zanaptak/TypedCssClasses</RepositoryUrl>
+    <PackageReleaseNotes>https://github.com/zanaptak/TypedCssClasses/releases</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-    <DefineConstants>TRACE;LOGGING_ENABLED;TIMESTAMPS_IN_LOG;INTERNALS_VISIBLE</DefineConstants>
+    <DefineConstants>TRACE;INTERNALS_VISIBLE</DefineConstants>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='TestRelease|AnyCPU'">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugLog|AnyCPU'">
+    <DefineConstants>TRACE;INTERNALS_VISIBLE;LOGGING_ENABLED;TIMESTAMPS_IN_LOG</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseTest|AnyCPU'">
     <DefineConstants>TRACE;INTERNALS_VISIBLE</DefineConstants>
+    <Optimize>true</Optimize>
+    <Tailcalls>true</Tailcalls>
   </PropertyGroup>
 
   <ItemGroup>

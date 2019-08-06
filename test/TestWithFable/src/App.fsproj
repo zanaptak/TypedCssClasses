@@ -3,6 +3,7 @@
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="appstyle.css" />
     <Compile Include="App.fs" />
   </ItemGroup>
   <ItemGroup>
@@ -11,7 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Zanaptak.TypedCssClasses">
-      <HintPath>..\..\..\src\bin\Debug\netstandard2.0\Zanaptak.TypedCssClasses.dll</HintPath>
+      <HintPath>..\..\..\src\bin\DebugLog\netstandard2.0\Zanaptak.TypedCssClasses.dll</HintPath>
     </Reference>
   </ItemGroup>
 </Project>

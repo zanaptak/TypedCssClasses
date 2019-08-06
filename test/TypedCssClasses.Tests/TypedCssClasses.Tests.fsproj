@@ -1,25 +1,50 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>netcoreapp2.2</TargetFramework>
     <IsPackable>false</IsPackable>
     <GenerateProgramFile>true</GenerateProgramFile>
-    <Configurations>Debug;Release</Configurations>
+    <Configurations>Debug;Release;ReleaseTest;DebugLog</Configurations>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="nunit" Version="3.11.0" />
-    <PackageReference Include="NUnit3TestAdapter" Version="3.11.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="15.9.0" />
+    <PackageReference Include="nunit" Version="3.12.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="3.13.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.2.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="UnitTest1.fs" />
+    <EmbeddedResource Include="testdata\tailwind-10-classes-reference.txt" />
+    <EmbeddedResource Include="testdata\tailwind-10-min-css.txt" />
+    <EmbeddedResource Include="testdata\bootstrap-431-classes-reference.txt" />
+    <EmbeddedResource Include="testdata\bootstrap-431-min-css.txt" />
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="Tests.fs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <Reference Include="Zanaptak.TypedCssClasses">
-      <HintPath>..\..\src\bin\TestRelease\netstandard2.0\Zanaptak.TypedCssClasses.dll</HintPath>
+      <HintPath>..\..\src\bin\Debug\netstandard2.0\Zanaptak.TypedCssClasses.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)|$(Platform)'=='DebugLog|AnyCPU'">
+    <Reference Include="Zanaptak.TypedCssClasses">
+      <HintPath>..\..\src\bin\DebugLog\netstandard2.0\Zanaptak.TypedCssClasses.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseTest|AnyCPU'">
+    <Reference Include="Zanaptak.TypedCssClasses">
+      <HintPath>..\..\src\bin\ReleaseTest\netstandard2.0\Zanaptak.TypedCssClasses.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <Reference Include="Zanaptak.TypedCssClasses">
+      <HintPath>..\..\src\bin\Release\netstandard2.0\Zanaptak.TypedCssClasses.dll</HintPath>
     </Reference>
   </ItemGroup>
 

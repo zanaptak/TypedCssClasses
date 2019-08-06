@@ -3,8 +3,9 @@ module internal Zanaptak.TypedCssClasses.Utils
 open System
 open System.Globalization
 open System.Text.RegularExpressions
+open Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime
 
-let symbolsToUnderscores className = Regex.Replace( className , @"[^a-z0-9A-Z]" , "_" )
+type Property = { Name : string ; Value : string }
 
 /// Converts the string to an array of Int32 code-points (the actual Unicode Code Point number).
 let toCodePoints (source : string) : seq<int> =
@@ -77,6 +78,132 @@ let unescapeHexStr hexStr =
   | true , codePoint when isUnicodeScalar codePoint -> Char.ConvertFromUtf32 codePoint
   | _ -> replacementChar
 
+
+// https://github.com/dotnet/fsharp/blob/master/src/fsharp/PrettyNaming.fs
+/// The characters that are allowed to be the first character of an identifier.
+let IsIdentifierFirstCharacter c =
+    if c = '_' then true
+    else
+        match Char.GetUnicodeCategory c with
+        // Letters
+        | UnicodeCategory.UppercaseLetter
+        | UnicodeCategory.LowercaseLetter
+        | UnicodeCategory.TitlecaseLetter
+        | UnicodeCategory.ModifierLetter
+        | UnicodeCategory.OtherLetter
+        | UnicodeCategory.LetterNumber -> true
+        | _ -> false
+
+// https://github.com/dotnet/fsharp/blob/master/src/fsharp/PrettyNaming.fs
+/// The characters that are allowed to be in an identifier.
+let IsIdentifierPartCharacter c =
+    if c = '\'' then true   // Tick
+    else
+        match Char.GetUnicodeCategory c with
+        // Letters
+        | UnicodeCategory.UppercaseLetter
+        | UnicodeCategory.LowercaseLetter
+        | UnicodeCategory.TitlecaseLetter
+        | UnicodeCategory.ModifierLetter
+        | UnicodeCategory.OtherLetter
+        | UnicodeCategory.LetterNumber
+        // Numbers
+        | UnicodeCategory.DecimalDigitNumber
+        // Connectors
+        | UnicodeCategory.ConnectorPunctuation // includes '_'
+        // Combiners
+        | UnicodeCategory.NonSpacingMark
+        | UnicodeCategory.SpacingCombiningMark -> true
+        | _ -> false
+
+// https://github.com/dotnet/fsharp/blob/master/src/fsharp/lexhelp.fs
+let keywords =
+  [
+    "abstract" ; "and" ; "as" ; "assert" ; "asr" ; "base" ; "begin" ; "class" ; "const" ; "default" ; "delegate" ; "do"
+    "done" ; "downcast" ; "downto" ; "elif" ; "else" ; "end" ; "exception" ; "extern" ; "false" ; "finally" ; "fixed"
+    "for" ; "fun" ; "function" ; "global" ; "if" ; "in" ; "inherit" ; "inline" ; "interface" ; "internal" ; "land"
+    "lazy" ; "let" ; "lor" ; "lsl" ; "lsr" ; "lxor" ; "match" ; "member" ; "mod" ; "module" ; "mutable" ; "namespace"
+    "new" ; "null" ; "of" ; "open" ; "or" ; "override" ; "private" ; "public" ; "rec" ; "return" ; "sig" ; "static"
+    "struct" ; "then" ; "to" ; "true" ; "try" ; "type" ; "upcast" ; "use" ; "val" ; "void" ; "when" ; "while" ; "with"
+    "yield" ; "_" ; "__token_OBLOCKSEP" ; "__token_OWITH" ; "__token_ODECLEND" ; "__token_OTHEN" ; "__token_OELSE"
+    "__token_OEND" ; "__token_ODO" ; "__token_OLET" ; "__token_constraint" ; "break" ; "checked" ; "component"
+    "constraint" ; "continue" ; "fori" ;  "include" ;  "mixin" ; "parallel" ; "params" ;  "process" ; "protected"
+    "pure" ; "sealed" ; "trait" ;  "tailcall" ; "virtual" ; "__SOURCE_DIRECTORY__" ; "__SOURCE_FILE__" ; "__LINE__"
+  ]
+  |> Set.ofList
+let isKeyword s = keywords |> Set.contains s
+
+let symbolsToUnderscores s =
+  // Process as codepoints so that surrogate pairs are handled as 1 character
+  s
+  |> toCodePoints
+  |> Seq.mapi ( fun i cp ->
+    if cp > 0xFFFF then [| '_' |] // replace supplementary char
+    else
+      let ch = char cp
+      // Replace symbols even if valid identifier chars, for consistency (visual and editor selection/cursor behavior)
+      if ch = '\'' then [| '_' |] // replace despite valid identifier char
+      elif Char.GetUnicodeCategory ch = UnicodeCategory.ConnectorPunctuation then [| '_' |] // replace despite valid identifier char
+      elif IsIdentifierPartCharacter ch then
+        if i > 0 then [| ch |] // interior position, valid interior char in interior position
+        elif IsIdentifierFirstCharacter ch then [| ch |] // first position, valid first char
+        else [| '_' ; ch |] // fisrt position, valid interior char but not valid first char, prefix with _
+      else [| '_' |] // replace all other chars
+  )
+  |> Seq.toArray
+  |> Array.collect id
+  |> String
+  |> fun s -> if isKeyword s then s + "_" else s // suffix with _ if final identifier is a keyword
+
+// Insert underscores at word boundaries inferred from case changes
+let wordCaseBoundaries s =
+  s
+  |> fun s -> Regex.Replace ( s , @"(\p{Lu})(\p{Ll})" , "_$1$2" ) // upper then lower
+  |> fun s -> Regex.Replace ( s , @"([^_\p{Lu}])([\p{Lu}])" , "$1_$2" ) // upper after non upper
+  |> fun s -> Regex.Replace ( s , @"(\p{Nd})([\p{Lu}\p{Ll}])" , "$1_$2" ) // upper/lower after digit
+
+let capitalize ( s : string ) = s.[ 0 ].ToString().ToUpperInvariant() + s.[ 1 .. ].ToLowerInvariant()
+
+type Case = Pascal | Camel
+
+// convert to mixed case, based on word boundaries identified by symbols and case changes
+let toCase ( case : Case ) ( s : string ) =
+  s
+  |> symbolsToUnderscores
+  |> wordCaseBoundaries
+  |> fun s -> s.Split( [| '_' |] , StringSplitOptions.RemoveEmptyEntries )
+  |> Array.mapi ( fun i s -> if i > 0 || case = Pascal then capitalize s else s.ToLowerInvariant() )
+  |> String.concat ""
+  |> fun s -> if String.IsNullOrWhiteSpace s then "__" else s
+  |> fun s -> if IsIdentifierFirstCharacter s.[ 0 ] then s else "_" + s // first position not valid, prefix with _
+  |> fun s -> if isKeyword s then s + "_" else s // suffix with _ if final identifier is a keyword
+
+let toPascalCase ( s : string ) = toCase Pascal s
+let toCamelCase ( s : string ) = toCase Camel s
+
+// http://fssnip.net/bj
+let levenshtein ( word1 : string ) ( word2 : string ) =
+    let chars1, chars2 = word1.ToCharArray(), word2.ToCharArray()
+    let m, n = chars1.Length, chars2.Length
+    let table : int[,] = Array2D.zeroCreate (m + 1) (n + 1)
+    for i in 0..m do
+        for j in 0..n do
+            match i, j with
+            | i, 0 -> table.[i, j] <- i * 10000
+            | 0, j -> table.[i, j] <- j * 10000
+            | _, _ ->
+                let delete = table.[i-1, j] + 10000
+                let insert = table.[i, j-1] + 10000 // ins/del highest cost, changes length
+                let substitute =
+                    if chars1.[i - 1] = chars2.[j - 1] then
+                      table.[i-1, j-1] // same character no cost
+                    elif Char.ToUpperInvariant( chars1.[i - 1] ) = Char.ToUpperInvariant( chars2.[j - 1] ) then
+                      table.[i-1, j-1] + 1 // case change lowest cost
+                    else
+                      table.[i-1, j-1] + 100 // substitution cost less than ins/del, keeps same length
+                table.[i, j] <- List.min [delete; insert; substitute]
+    table.[m, n] //, table
+
 // Capture selector text from first non-whitespace up to first {
 // Then capture content inside the outer {} block (handles nested {} with .NET balancing groups regex feature)
 let selectorsAndBlockCapture = @"
@@ -106,7 +233,7 @@ let classCapture = @"
   )
 "
 
-let selectorsAndBlocks text =
+let rec selectorPreludesFromCss text =
   Regex.Matches(
     text
     , selectorsAndBlockCapture
@@ -114,9 +241,15 @@ let selectorsAndBlocks text =
     , TimeSpan.FromSeconds 5.
   )
   |> Seq.cast
-  |> Seq.map ( fun ( m : Match ) -> m.Groups.[ "selectors" ].Value , m.Groups.[ "blockcontent" ].Value )
+  |> Seq.map ( fun ( m : Match ) -> m.Groups.[ "selectors" ].Value.Trim() , m.Groups.[ "blockcontent" ].Value )
+  |> Seq.collect ( fun ( selectors , blockContent ) ->
+    if selectors.StartsWith( "@media" ) || selectors.StartsWith( "@supports" ) then
+      selectorPreludesFromCss blockContent
+    else
+      Seq.singleton selectors
+  )
 
-let rawClasses text =
+let classNamesFromSelectorText text =
   Regex.Matches(
     text
     , classCapture
@@ -141,22 +274,42 @@ let rawClasses text =
     |> replaceNonHtml
   )
 
-let parseCss text transformer =
+let classNamesFromCss text =
   text
   |> fun t -> Regex.Replace( t , @"\s*/\*([^*]|\*(?!/))*\*/\s*" , "" , RegexOptions.None , TimeSpan.FromSeconds 5. )
-  |> selectorsAndBlocks
-  |> Seq.collect ( fun ( selectors , blockContent ) ->
-    if selectors.Trim().StartsWith( @"@media" ) then
-      blockContent
-      |> selectorsAndBlocks
-      |> Seq.map fst
-    else
-      Seq.singleton selectors
-  )
-  |> Seq.collect rawClasses
+  |> selectorPreludesFromCss
+  |> Seq.collect classNamesFromSelectorText
   |> Seq.distinct
-  |> Seq.map ( fun s ->
-    {| Property = transformer s ; Value = s |}
-  )
-  |> Seq.distinctBy ( fun p -> p.Property )
 
+let parseCss text transformer =
+  let uniqueName = NameUtils.uniqueGenerator' ()
+
+  let initialProperties =
+    text
+    |> classNamesFromCss
+    |> Seq.map ( fun s ->
+      { Name = transformer s ; Value = s }
+    )
+    |> Seq.filter ( fun p -> not ( p.Name.Contains( "``" ) ) ) // impossible to represent as verbatim property name, user will have to use string value
+
+  let sameNames , differentNames = initialProperties |> Seq.toArray |> Array.partition ( fun p -> p.Name = p.Value )
+
+  // A name that exactly matches raw value is exempt from conflict resolution, reserve unique name immediately.
+  // register unique base names in case later suffixed name conflicts
+  // e.g. xyz_2 followed by group of xyz, xyz, xyz, they need to know xyz_2 is already reserved
+  let sameNamesFinal = sameNames |> Array.map ( fun p -> { p with Name = uniqueName p.Name } )
+
+  let differentNamesFinal =
+    differentNames
+    |> Array.groupBy ( fun p -> p.Name )
+    |> Array.collect ( fun ( propName , props ) ->
+      if Array.length props = 1 then
+        [| { props.[ 0 ] with Name = uniqueName propName } |]
+      else
+        // entries with same property name, closest to underying text value gets first chance at unique base name, others get numbered suffix
+        props
+        |> Array.sortBy ( fun p -> levenshtein propName p.Value , p.Value )
+        |> Array.map ( fun p -> { p with Name = uniqueName propName } )
+    )
+
+  Seq.append sameNamesFinal differentNamesFinal
