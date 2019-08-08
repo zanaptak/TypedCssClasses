@@ -1,0 +1,19 @@
+@tailwind base;
+
+@tailwind components;
+
+/* add custom component classes before utilities -- https://tailwindcss.com/docs/extracting-components */
+
+.custom-blue-button {
+  @apply bg-blue-500 text-white text-lg font-bold py-02 px-04 rounded-full border-2 border-white
+}
+
+.custom-blue-button:hover {
+  @apply bg-blue-700
+}
+
+.custom-blue-button:focus {
+  @apply outline-none border-gray-400
+}
+
+@tailwind utilities;
