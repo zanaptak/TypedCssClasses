@@ -59,7 +59,9 @@ div [ ClassName <| String.concat " " [
 
 #### CSS bundle size
 
-When using a custom-generated Tailwind CSS file in your local build process, the [Tailwind documentation](https://tailwindcss.com/docs/controlling-file-size) recommends using Purgecss to reduce your CSS bundle size. With the `Naming.Verbatim` option, that technique will work with this library as well. Just point Purgecss at your *.fs view files, and it will identify the classes you are actually using and remove unused classes from the final bundle.
+When using a custom-generated Tailwind CSS file in your local build process, the [Tailwind documentation](https://tailwindcss.com/docs/controlling-file-size) recommends using Purgecss to reduce your CSS bundle size. With the `Naming.Verbatim` option, that technique will work with this library as well. Include your `*.fs` view files in the Purgecss content definition, and it will identify the classes you are actually using and remove unused classes from the final bundle.
+
+Try it out with the [Fable Tailwind sample](https://github.com/zanaptak/TypedCssClasses/tree/master/sample/FableTailwind).
 
 ## Getting started
 
@@ -82,7 +84,7 @@ type css = CssClasses<"https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bo
 let x = css.``display-1``
 ```
 
-The design-time capability is known to work with Visual Studio Code (with Ionide-fsharp extension) on Windows and Linux, and Visual Studio 2019 on Windows. (Other environments/IDEs have not been tested by me.)
+Works with Visual Studio Code (with Ionide-fsharp extension) on Windows and Linux, and Visual Studio 2019 on Windows. (Other environments/IDEs have not been tested by me.)
 
 ## Parameters
 
@@ -97,18 +99,48 @@ The source CSS to process. Can be a file path, web URL, or CSS text.
 * `Naming.CamelCase`: convert to camel case names with all non-alphanumeric characters removed.
 * `Naming.PascalCase`: convert to Pascal case names with all non-alphanumeric characters removed.
 
-Verbatim is the default naming strategy to avoid the small chance of name collisions. For example, if the CSS contained ``class-1`` and ``class_1``, none of the non-verbatim options would be able to generate two unique property names and thus would provide only one of them arbitrarily in the generated type.
+If a naming option produces collisions, such as `card-text` and `card_text` both mapping to `CardText` in Pascal case, then the duplicate names will receive `_2`, `_3`, etc. suffixes as needed.
 
 ### resolutionFolder
 
-A custom folder to use for resolving relative file paths. (Default is the project root folder.)
+A custom folder to use for resolving relative file paths. The default is the project root folder.
+
+To have nested code files referencing CSS files in the same directory without having to specify the entire path from project root, you can use the built-in F# `__SOURCE_DIRECTORY__` value:
+
+```fs
+type css = CssClasses<"file-in-same-dir.css", resolutionFolder=__SOURCE_DIRECTORY__>
+```
+
+### getProperties
+
+If true, the type will include a `GetProperties()` method that returns a sequence of the generated property name/value pairs. You could use this, for example, to produce a simple hard-coded standalone set of bindings by running the following `.fsx` script:
+
+```fs
+// NOTE: update this reference to a valid assembly location on your machine
+#r "YOUR_USER_HOME_DIRECTORY/.nuget/packages/zanaptak.typedcssclasses/0.0.3/lib/netstandard2.0/Zanaptak.TypedCssClasses.dll"
+open Zanaptak.TypedCssClasses
+type css = CssClasses<"https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css", Naming.CamelCase, getProperties=true>
+css.GetProperties()
+|> Seq.sortBy (fun p -> p.Name)
+|> Seq.iter (fun p -> printfn "let %s = \"%s\"" p.Name p.Value)
+```
+
+Example output:
+```
+let accent1 = "accent-1"
+let accent2 = "accent-2"
+let accent3 = "accent-3"
+let accent4 = "accent-4"
+let activator = "activator"
+...
+```
 
 ## Notes
 
 As with all type providers, the source CSS file must be available at both design time and build time.
 
-With Fable, relative file paths currently fail during build (but they work in the IDE). Use absolute paths for now.
-
-This does not use formal CSS parsing, just identifying classes by typical selector patterns. It's working on the major CSS frameworks but may fail on more obscure CSS syntax.
+This provider does not use formal CSS parsing, just identifying classes by typical selector patterns. It's working on the major CSS frameworks but may fail on more obscure CSS syntax.
 
 Web URLs are expected to use static CDN or otherwise unchanging content and are cached on the local filesystem with a 90-day expiration.
+
+If using Fable, update fable-compiler to version 2.3.17 or later to avoid an issue with the type provider failing to resolve relative file paths.
