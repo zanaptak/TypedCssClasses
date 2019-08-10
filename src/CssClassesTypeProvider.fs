@@ -20,6 +20,7 @@ module TypeProvider =
   type CssClassesTypeProvider ( config : TypeProviderConfig ) as this =
     inherit DisposableTypeProviderForNamespaces( config )
 
+#if LOGGING_ENABLED
     do
       IO.log ( sprintf "TypeProviderConfig.IsHostedExecution = %b" config.IsHostedExecution )
       IO.log ( sprintf "TypeProviderConfig.IsInvalidationSupported = %b" config.IsInvalidationSupported )
@@ -40,6 +41,7 @@ module TypeProvider =
 
       IO.log ( sprintf "Environment.CommandLine = %s" Environment.CommandLine )
       IO.log ( sprintf "Environment.CurrentDirectory = %s" Environment.CurrentDirectory )
+#endif
 
     let ns = "Zanaptak.TypedCssClasses"
     let asm = Assembly.GetExecutingAssembly()
@@ -51,6 +53,7 @@ module TypeProvider =
       let source = args.[ 0 ] :?> string
       let naming = args.[ 1 ] :?> Naming
       let resolutionFolder = args.[ 2 ] :?> string
+      let getProperties = args.[ 3 ] :?> bool
 
       let getSpec _ value =
 
@@ -75,6 +78,28 @@ module TypeProvider =
           cssType.AddMember prop
         )
 
+        if getProperties then
+          let rowType = ProvidedTypeDefinition("Property", Some(typeof<string[]>), hideObjectMethods = true)
+          let rowNameProp = ProvidedProperty("Name", typeof<string>, getterCode = fun (Singleton row) -> <@@ (%%row:string[]).[0] @@>)
+          rowNameProp.AddXmlDoc "Generated property name using specified naming strategy."
+          let rowValueProp = ProvidedProperty("Value", typeof<string>, getterCode = fun (Singleton row) -> <@@ (%%row:string[]).[1] @@>)
+          rowValueProp.AddXmlDoc "The underlying CSS class value."
+
+          rowType.AddMember rowNameProp
+          rowType.AddMember rowValueProp
+          cssType.AddMember rowType
+
+          let propsArray = cssClasses |> Seq.map ( fun p -> [| p.Name ; p.Value |] ) |> Seq.toArray
+          let usedNames = cssClasses |> Seq.map ( fun p -> p.Name ) |> Set.ofSeq
+          let methodName =
+            Seq.init 99 ( fun i -> "GetProperties" + if i = 0 then "" else "_" + string ( i + 1 ) )
+            |> Seq.find ( fun s -> usedNames |> Set.contains s |> not )
+          let staticMethod =
+            ProvidedMethod(methodName, [], typedefof<seq<_>>.MakeGenericType(rowType), isStatic = true,
+              invokeCode = fun _-> <@@ propsArray @@>)
+
+          cssType.AddMember staticMethod
+
         {
           GeneratedType = cssType
           RepresentationType = cssType
@@ -88,18 +113,16 @@ module TypeProvider =
       ProvidedStaticParameter( "source" , typeof< string >, parameterDefaultValue = "" )
       ProvidedStaticParameter( "naming" , typeof< Naming >, parameterDefaultValue = Naming.Verbatim )
       ProvidedStaticParameter( "resolutionFolder" , typeof< string >, parameterDefaultValue = "" )
+      ProvidedStaticParameter( "getProperties" , typeof< bool >, parameterDefaultValue = false )
     ]
 
     let helpText = """
-      <summary>Typed CSS classes.</summary>
+      <summary>Typed CSS classes. Provides generated properties representing CSS classes from a stylesheet.</summary>
       <param name='source'>Location of a CSS stylesheet (file path or web URL), or a string containing CSS text.</param>
-      <param name='naming'>Naming strategy for class name properties, specified by the Naming enum.
-        Verbatim: (default) use class names verbatim from source CSS, requiring backtick-quotes for names with special characters.
-        Underscores: replace all non-alphanumeric characters with underscores.
-        CamelCase: convert to camel case names with all non-alphanumeric characters removed.
-        PascalCase: convert to Pascal case names with all non-alphanumeric characters removed.
-      </param>
+      <param name='naming'>Naming strategy for class name properties.
+        One of: Naming.Verbatim (default), Naming.Underscores, Naming.CamelCase, Naming.PascalCase.</param>
       <param name='resolutionFolder'>A directory that is used when resolving relative file references.</param>
+      <param name='getProperties'>Adds a GetProperties() method that returns a seq of all generated property name/value pairs.</param>
     """
 
     do parentType.AddXmlDoc helpText
