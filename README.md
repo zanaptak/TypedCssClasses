@@ -26,7 +26,7 @@ div [ ClassName Bootstrap.Card ] [
 ### Font Awesome CSS
 
 ```fs
-type icon = CssClasses<"https://use.fontawesome.com/releases/v5.9.0/css/all.min.css", Naming.Underscores>
+type icon = CssClasses<"static/font-awesome/css/all.css", Naming.Underscores> // example using local CSS
 
 i [ classList [
     icon.far, true
