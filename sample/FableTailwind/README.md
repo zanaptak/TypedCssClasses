@@ -12,7 +12,9 @@ This sample illustrates the following concepts:
 
 ## Quick start
 
-Install the necessary prerequisites [for a typical Fable application](https://github.com/fable-compiler/fable2-samples/tree/master/minimal).
+Install [.NET Core SDK](https://dotnet.microsoft.com/download).
+
+Install [Node.js](https://nodejs.org/).
 
 Run `npm install`.
 
@@ -34,11 +36,11 @@ Run the `watch.cmd` (Windows) or `watch.sh` (Linux) script, and then browse to `
 
   In the code, note `type tailwind = CssClasses<...>` to initialize the type provider, `tailwind.`-prefixed CSS class properties, and `style.`-prefixed inline styles.
 
-* `css/generated.css`
+* `css/tailwind-generated.css`
 
   The generated file that contains all CSS classes available to your application. This file serves as the comprehensive CSS reference for the TypedCssClasses type provider at design-time.
 
-* `css/source.css`
+* `css/tailwind-source.css`
 
   The source CSS file that is used to generate the tailwind utility classes as well as any custom CSS you have added. In this sample, custom CSS has been added for a common button style.
 
@@ -48,7 +50,7 @@ Run the `watch.cmd` (Windows) or `watch.sh` (Linux) script, and then browse to `
 
 * `postcss.config.js`
 
-  The file that configures PostCSS with the [@fullhuman/postcss-purgecss](https://github.com/FullHuman/postcss-purgecss) plugin to look at your src/*.fs files to identify used classes, so that it can purge unused classes from the final bundle
+  The file that configures PostCSS with the [@fullhuman/postcss-purgecss](https://github.com/FullHuman/postcss-purgecss) plugin to look at your src/*.fs files to identify used classes, so that it can purge unused classes from the final bundle.
 
 * `deploy/`
 
@@ -56,8 +58,8 @@ Run the `watch.cmd` (Windows) or `watch.sh` (Linux) script, and then browse to `
 
 ## Managing the generated CSS file
 
-Note that the `generated.css` file is not the final CSS that ships with deployed versions of your app, it is only the design-time reference. The final CSS gets regenerated and bundled separately each time you perform a build.
+Note that the `tailwind-generated.css` file is not the final CSS that ships with deployed versions of your app, it is only the design-time reference. The final CSS gets regenerated and bundled separately each time you perform a build.
 
-If you change any CSS generation options in `tailwind.config.js` or `source.css`, you must make sure to update the `generated.css` file so that the design-time reference accurately reflects the new configuration. Otherwise, you could end up in a situation where your application successfully compiles against an outdated `generated.css` file, but contains incorrect class names that will fail to resolve at runtime against a differently-configured bundle.
+If you change any CSS generation options in `tailwind.config.js` or `tailwind-source.css`, you must make sure to update the `tailwind-generated.css` file so that the design-time reference accurately reflects the new configuration. Otherwise, you could end up in a situation where your application successfully compiles against an outdated `tailwind-generated.css` file, but contains incorrect class names that will fail to resolve at runtime against a differently-configured bundle.
 
-To assist with keeping `generated.css` up to date, the package.json file defines the command `npm run css` that you can run manually at any time. Additionally, the build and watch scripts provided in this sample always run this as a prebuild step.
+To assist with keeping `tailwind-generated.css` up to date, the package.json file defines the command `npm run css` that you can run manually at any time. Additionally, the build and watch scripts provided in this sample always run this as a prebuild step.

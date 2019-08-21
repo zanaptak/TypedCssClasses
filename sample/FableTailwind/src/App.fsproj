@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
@@ -7,8 +7,9 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Fable.Core" Version="3.0.0" />
+    <PackageReference Include="Fable.Elmish.HMR" Version="4.0.1" />
     <PackageReference Include="Fable.Elmish.React" Version="3.0.1" />
-    <PackageReference Include="Feliz" Version="0.38.0" />
-    <PackageReference Include="Zanaptak.TypedCssClasses" Version="0.0.2" />
+    <PackageReference Include="Feliz" Version="0.41.0" />
+    <PackageReference Include="Zanaptak.TypedCssClasses" Version="0.0.3" />
   </ItemGroup>
 </Project>

@@ -385,6 +385,7 @@ h3,
 h4,
 h5,
 h6,
+hr,
 figure,
 p,
 pre {
@@ -462,7 +463,7 @@ html {
  */
 
 hr {
-  border-width: 1px;
+  border-top-width: 1px;
 }
 
 /**
@@ -643,7 +644,7 @@ video {
   padding-right: 1rem;
   border-radius: 9999px;
   border-width: 2px;
-  border-color: #fff
+  border-color: #4299e1
 }
 
 .custom-blue-button:hover {
@@ -652,7 +653,7 @@ video {
 
 .custom-blue-button:focus {
   outline: 0;
-  border-color: #cbd5e0
+  border-color: #2b6cb0
 }
 
 .sr-only {

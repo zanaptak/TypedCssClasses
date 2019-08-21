@@ -3,11 +3,11 @@
   "scripts": {
     "start": "webpack-dev-server",
     "build": "webpack -p",
-    "css": "tailwind build css/source.css -o css/generated.css"
+    "css": "tailwind build css/tailwind-source.css -o css/tailwind-generated.css"
   },
   "dependencies": {
-    "react": "^16.8.6",
-    "react-dom": "^16.8.6"
+    "react": "^16.9.0",
+    "react-dom": "^16.9.0"
   },
   "devDependencies": {
     "@babel/core": "^7.5.5",
@@ -15,19 +15,19 @@
     "@fullhuman/postcss-purgecss": "^1.2.0",
     "babel-loader": "^8.0.6",
     "copy-webpack-plugin": "^5.0.4",
-    "core-js": "^3.1.4",
+    "core-js": "^3.2.1",
     "css-loader": "^3.2.0",
     "cssnano": "^4.1.10",
-    "fable-compiler": "^2.3.18",
+    "fable-compiler": "^2.3.19",
     "fable-loader": "^2.1.8",
     "file-loader": "^4.2.0",
     "html-webpack-plugin": "^3.2.0",
     "mini-css-extract-plugin": "^0.8.0",
     "postcss-loader": "^3.0.0",
     "style-loader": "^1.0.0",
-    "tailwindcss": "^1.1.0",
-    "webpack": "^4.39.1",
-    "webpack-cli": "^3.3.6",
-    "webpack-dev-server": "^3.7.2"
+    "tailwindcss": "^1.1.2",
+    "webpack": "^4.39.2",
+    "webpack-cli": "^3.3.7",
+    "webpack-dev-server": "^3.8.0"
   }
 }

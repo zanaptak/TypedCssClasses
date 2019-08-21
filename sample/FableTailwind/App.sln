@@ -7,11 +7,11 @@ Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "App", "src\App.fsproj", "{E
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{3E6CCADF-250E-4646-84F3-3BEE70E243D4}"
 	ProjectSection(SolutionItems) = preProject
-		css\generated.css = css\generated.css
 		package.json = package.json
 		postcss.config.js = postcss.config.js
 		README.md = README.md
-		css\source.css = css\source.css
+		css\tailwind-generated.css = css\tailwind-generated.css
+		css\tailwind-source.css = css\tailwind-source.css
 		tailwind.config.js = tailwind.config.js
 		webpack.config.js = webpack.config.js
 	EndProjectSection

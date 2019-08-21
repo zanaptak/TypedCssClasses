@@ -4,11 +4,9 @@ A CSS class type provider for F# web development.
 
 Bring external stylesheet classes into your F# code as design-time discoverable compiler-verified properties.
 
-(This is a work in progress. Features and API are subject to change, with no promise of backward compatibility during early development.)
-
 ## Examples
 
-The following examples are using [Fable.React](https://fable.io/blog/Announcing-Fable-React-5.html) view syntax, but any other web framework should work as well since the provided properties compile to strings.
+The following examples use [Fable.React](https://fable.io/blog/Announcing-Fable-React-5.html) view syntax, but any other web framework should work as well since the provided properties compile to strings.
 
 ### Bootstrap CSS
 

@@ -7,12 +7,8 @@ module App
 
 open Elmish
 open Elmish.React
+open Elmish.HMR
 open Feliz
-
-open Zanaptak.TypedCssClasses
-
-// Naming.Verbatim required for Purgecss bundle reduction -- https://tailwindcss.com/docs/controlling-file-size
-type tailwind = CssClasses<"../css/generated.css", Naming.Verbatim>
 
 // MODEL
 
@@ -32,6 +28,11 @@ let update (msg:Msg) (model:Model) =
     | Decrement -> model - 1
 
 // VIEW (rendered with React)
+
+open Zanaptak.TypedCssClasses
+
+// Naming.Verbatim required for Purgecss bundle reduction -- https://tailwindcss.com/docs/controlling-file-size
+type tailwind = CssClasses<"../css/tailwind-generated.css", Naming.Verbatim>
 
 let view (model:Model) dispatch =
 
