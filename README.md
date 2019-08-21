@@ -4,7 +4,11 @@ A CSS class type provider for F# web development.
 
 Bring external stylesheet classes into your F# code as design-time discoverable compiler-verified properties.
 
-## Examples
+## Demo
+
+Check out the [Fable Tailwind sample](https://github.com/zanaptak/TypedCssClasses/tree/master/sample/FableTailwind) to see it in action.
+
+## Code examples
 
 The following examples use [Fable.React](https://fable.io/blog/Announcing-Fable-React-5.html) view syntax, but any other web framework should work as well since the provided properties compile to strings.
 

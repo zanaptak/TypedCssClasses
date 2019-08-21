@@ -1,5 +1,7 @@
 # TypedCssClasses Fable Tailwind Sample
 
+![Demo](demo.gif)
+
 This sample illustrates the following concepts:
 
 * Using [TypedCssClasses](https://github.com/zanaptak/TypedCssClasses) for type-safe CSS class properties in a [Fable](https://fable.io/) single page application.
@@ -10,7 +12,7 @@ This sample illustrates the following concepts:
 
 * Using [Feliz](https://github.com/Zaid-Ajaj/Feliz/) for type-safe inline styles when you don't have a CSS class available to produce the desired effect.
 
-## Quick start
+## Getting started
 
 Install [.NET Core SDK](https://dotnet.microsoft.com/download).
 
@@ -18,7 +20,7 @@ Install [Node.js](https://nodejs.org/).
 
 Run `npm install`.
 
-Run the `watch.cmd` (Windows) or `watch.sh` (Linux) script, and then browse to `http://localhost:8080`. You should see a simple counter app with blue buttons styled with Tailwind.
+Run the `watch.cmd` (Windows) or `watch.sh` (Linux) script, and then browse to `http://localhost:8080`. You should see a simple counter app with blue buttons styled with Tailwind CSS.
 
 ## Project structure
 
