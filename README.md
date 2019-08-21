@@ -38,20 +38,20 @@ i [ classList [
 ### Tailwind CSS
 
 ```fs
-type t = CssClasses<"https://unpkg.com/tailwindcss@^1.0/dist/tailwind.min.css", Naming.Verbatim>
+type tw = CssClasses<"https://unpkg.com/tailwindcss@^1.0/dist/tailwind.min.css", Naming.Verbatim>
 
 div [ ClassName <| String.concat " " [
-        t.``bg-red-200``
-        t.``hover:bg-red-500``
-        t.``hover:font-bold``
+        tw.``bg-red-200``
+        tw.``hover:bg-red-500``
+        tw.``hover:font-bold``
 
-        t.``sm:text-2xl``
-        t.``sm:bg-green-200``
-        t.``sm:hover:bg-green-500``
+        tw.``sm:text-2xl``
+        tw.``sm:bg-green-200``
+        tw.``sm:hover:bg-green-500``
 
-        t.``lg:text-4xl``
-        t.``lg:bg-blue-200``
-        t.``lg:hover:bg-blue-500`` ]
+        tw.``lg:text-4xl``
+        tw.``lg:bg-blue-200``
+        tw.``lg:hover:bg-blue-500`` ]
 ] [ str "Resize me! Hover me!" ]
 ```
 
@@ -115,7 +115,7 @@ If true, the type will include a `GetProperties()` method that returns a sequenc
 
 ```fs
 // NOTE: update this reference to a valid assembly location on your machine
-#r "YOUR_USER_HOME_DIRECTORY/.nuget/packages/zanaptak.typedcssclasses/0.0.3/lib/netstandard2.0/Zanaptak.TypedCssClasses.dll"
+#r "YOUR_USER_HOME_DIRECTORY/.nuget/packages/zanaptak.typedcssclasses/0.1.0/lib/netstandard2.0/Zanaptak.TypedCssClasses.dll"
 open Zanaptak.TypedCssClasses
 type css = CssClasses<"https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css", Naming.CamelCase, getProperties=true>
 css.GetProperties()
