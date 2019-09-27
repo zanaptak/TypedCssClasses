@@ -101,7 +101,7 @@ The source CSS to process. Can be a file path, web URL, or CSS text.
 * `Naming.CamelCase`: convert to camel case names with all non-alphanumeric characters removed.
 * `Naming.PascalCase`: convert to Pascal case names with all non-alphanumeric characters removed.
 
-If a naming option produces collisions, such as `card-text` and `card_text` both mapping to `CardText` in Pascal case, then the duplicate names will receive `_2`, `_3`, etc. suffixes as needed.
+Note that non-verbatim naming options can produce name collisions. See the [`nameCollisions`](#nameCollisions) parameter for details. 
 
 ### resolutionFolder
 
@@ -136,6 +136,14 @@ let accent4 = "accent-4"
 let activator = "activator"
 ...
 ```
+
+### nameCollisions
+
+If a naming option produces collisions, such as `card-text` and `card_text` CSS classes both mapping to a `CardText` property in Pascal case, then the duplicate names will be handled according to this option.
+
+- `NameCollisions.BasicSuffix`: (default) The base property name will refer to the closest text match, and additional properties will receive `_2`, `_3`, etc. suffixes as needed. Note that if this option is used during ongoing CSS development, it can cause existing properties to silently change to refer to different classes if collisions are introduced that affect the base name and number determination.
+- `NameCollisions.ExtendedSuffix`: All property names involved in a collision will receive an extended numbered suffix such as `__1_of_2`,  `__2_of_2`. This option is safer for ongoing development since any introduced collision will change all involved names and produce immediate compiler errors where the previous names were used.
+- `NameCollisions.Omit`: All colliding properties will be omitted from the generated type. This option is safer for ongoing development since any introduced collision will remove the original property and produce immediate compiler errors wherever it was used.
 
 ## Notes
 

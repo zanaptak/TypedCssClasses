@@ -98,17 +98,6 @@ let uniqueGenerator (niceName:string->string) =
     set.Add name |> ignore
     name
 
-let uniqueGenerator' () =
-  let set = new HashSet<_>()
-  fun ( baseName : string ) ->
-    let mutable name = baseName
-    let mutable trySuffix = 1
-    while set.Contains name do
-      trySuffix <- trySuffix + 1
-      name <- baseName + "_" + string trySuffix
-    set.Add name |> ignore
-    name
-
 let capitalizeFirstLetter (s:string) =
     match s.Length with
         | 0 -> ""

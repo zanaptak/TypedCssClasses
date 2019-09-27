@@ -1,9 +1,9 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFrameworks>netstandard2.0;net452</TargetFrameworks>
     <DisableImplicitSystemValueTupleReference>true</DisableImplicitSystemValueTupleReference>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <PackageId>Zanaptak.TypedCssClasses</PackageId>
     <Authors>zanaptak</Authors>
     <Product>Zanaptak.TypedCssClasses</Product>
@@ -14,6 +14,7 @@
     <PackageProjectUrl>https://github.com/zanaptak/TypedCssClasses</PackageProjectUrl>
     <Configurations>Debug;Release;ReleaseTest;DebugLog</Configurations>
     <RepositoryUrl>https://github.com/zanaptak/TypedCssClasses.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <PackageReleaseNotes>https://github.com/zanaptak/TypedCssClasses/releases</PackageReleaseNotes>
   </PropertyGroup>
 
@@ -56,6 +57,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="Types.fs" />
     <Compile Include="Utils.fs" />
     <Compile Include="CssClassesTypeProvider.fs" />
   </ItemGroup>

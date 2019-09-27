@@ -4,6 +4,7 @@ open System
 open System.Globalization
 open System.Text.RegularExpressions
 open Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime
+open System.Collections.Generic
 
 type Property = { Name : string ; Value : string }
 
@@ -281,35 +282,102 @@ let classNamesFromCss text =
   |> Seq.collect classNamesFromSelectorText
   |> Seq.distinct
 
-let parseCss text transformer =
-  let uniqueName = NameUtils.uniqueGenerator' ()
+let basicSuffixGenerator () =
+  let nameSet = new HashSet<_>()
+  fun ( baseName : string ) ->
+    let mutable name = baseName
+    let mutable trySuffix = 1
+    while nameSet.Contains name do
+      trySuffix <- trySuffix + 1
+      name <- baseName + "_" + string trySuffix
+    nameSet.Add name |> ignore
+    name
+
+type ExtendedSuffixGenerator () =
+  let nameSet = new HashSet<_>()
+
+  member this.Single ( baseName : string ) =
+    let mutable name = baseName
+    let mutable trySuffix = ""
+    while nameSet.Contains name do
+      // shouldn't happen, but just in case
+      if trySuffix = "" then
+        trySuffix <- "__1_of_1"
+      else
+        trySuffix <- "_" + trySuffix
+      name <- baseName + trySuffix
+    nameSet.Add name |> ignore
+    name
+
+  member this.Multiple ( baseName : string ) count =
+    let mutable leadingUnderscores = "__"
+    let digits = ( float count |> Math.Log10 |> int ) + 1
+    let numStr num = ( string num ).PadLeft( digits , '0' )
+    let nameArray underscores = Array.init count ( fun i -> sprintf "%s%s%s_of_%s" baseName underscores ( numStr ( i + 1 ) ) ( numStr count ) )
+    let mutable names = nameArray leadingUnderscores
+    while names |> Array.exists ( fun name -> nameSet.Contains name ) do
+      // If any in a group match an existing name, try again with additional underscore
+      leadingUnderscores <- leadingUnderscores + "_"
+      names <- nameArray leadingUnderscores
+    names |> Array.iter ( fun name -> nameSet.Add name |> ignore )
+    names
+
+let parseCss text naming nameCollisions =
+
+  let transformer =
+    match naming with
+    | Naming.Underscores -> symbolsToUnderscores
+    | Naming.CamelCase -> toCamelCase
+    | Naming.PascalCase -> toPascalCase
+    | _ -> id
 
   let initialProperties =
     text
     |> classNamesFromCss
-    |> Seq.map ( fun s ->
-      { Name = transformer s ; Value = s }
-    )
+    |> Seq.map ( fun s -> { Name = transformer s ; Value = s } )
     |> Seq.filter ( fun p -> not ( p.Name.Contains( "``" ) ) ) // impossible to represent as verbatim property name, user will have to use string value
+    |> Seq.toArray
 
-  let sameNames , differentNames = initialProperties |> Seq.toArray |> Array.partition ( fun p -> p.Name = p.Value )
+  match nameCollisions with
 
-  // A name that exactly matches raw value is exempt from conflict resolution, reserve unique name immediately.
-  // register unique base names in case later suffixed name conflicts
-  // e.g. xyz_2 followed by group of xyz, xyz, xyz, they need to know xyz_2 is already reserved
-  let sameNamesFinal = sameNames |> Array.map ( fun p -> { p with Name = uniqueName p.Name } )
-
-  let differentNamesFinal =
-    differentNames
+  | NameCollisions.Omit ->
+    initialProperties
     |> Array.groupBy ( fun p -> p.Name )
+    |> Array.filter ( fun ( _ , props ) -> props.Length = 1 )
+    |> Array.collect snd
+
+  | NameCollisions.ExtendedSuffix ->
+    let nameGen = ExtendedSuffixGenerator()
+    initialProperties
+    |> Array.groupBy ( fun p -> p.Name )
+    |> Array.sortBy ( fun ( propName , props ) -> props.Length , propName )
     |> Array.collect ( fun ( propName , props ) ->
       if Array.length props = 1 then
-        [| { props.[ 0 ] with Name = uniqueName propName } |]
+        [| { props.[ 0 ] with Name = nameGen.Single propName } |]
       else
-        // entries with same property name, closest to underying text value gets first chance at unique base name, others get numbered suffix
-        props
-        |> Array.sortBy ( fun p -> levenshtein propName p.Value , p.Value )
-        |> Array.map ( fun p -> { p with Name = uniqueName propName } )
+        let sorted = props |> Array.sortBy ( fun p -> levenshtein propName p.Value , p.Value )
+        let names = nameGen.Multiple propName props.Length
+        Array.zip sorted names
+        |> Array.map ( fun ( p , name ) -> { p with Name = name } )
     )
 
-  Seq.append sameNamesFinal differentNamesFinal
+  | _ ->
+    let nameGen = basicSuffixGenerator ()
+    // A name that exactly matches raw value is exempt from conflict resolution, reserve unique name immediately.
+    // register unique base names in case later suffixed name conflicts
+    // e.g. xyz_2 followed by group of xyz, xyz, xyz, they need to know xyz_2 is already reserved
+    let sameNames , differentNames = initialProperties |> Array.partition ( fun p -> p.Name = p.Value )
+    let sameNamesFinal = sameNames |> Array.map ( fun p -> { p with Name = nameGen p.Name } )
+    let differentNamesFinal =
+      differentNames
+      |> Array.groupBy ( fun p -> p.Name )
+      |> Array.collect ( fun ( propName , props ) ->
+        if Array.length props = 1 then
+          [| { props.[ 0 ] with Name = nameGen propName } |]
+        else
+          // entries with same property name, closest to underying text value gets first chance at unique base name, others get numbered suffix
+          props
+          |> Array.sortBy ( fun p -> levenshtein propName p.Value , p.Value )
+          |> Array.map ( fun p -> { p with Name = nameGen propName } )
+      )
+    Array.append sameNamesFinal differentNamesFinal

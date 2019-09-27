@@ -8,12 +8,6 @@ open FSharp.Core.CompilerServices
 open System
 open System.Reflection
 
-type Naming =
-  | Verbatim = 0
-  | Underscores = 1
-  | CamelCase = 2
-  | PascalCase = 3
-
 module TypeProvider =
 
   [< TypeProvider >]
@@ -54,17 +48,11 @@ module TypeProvider =
       let naming = args.[ 1 ] :?> Naming
       let resolutionFolder = args.[ 2 ] :?> string
       let getProperties = args.[ 3 ] :?> bool
+      let nameCollisions = args.[ 4 ] :?> NameCollisions
 
       let getSpec _ value =
 
-        let transformer =
-          match naming with
-          | Naming.Underscores -> Utils.symbolsToUnderscores
-          | Naming.CamelCase -> Utils.toCamelCase
-          | Naming.PascalCase -> Utils.toPascalCase
-          | _ -> id
-
-        let cssClasses = Utils.parseCss value transformer
+        let cssClasses = Utils.parseCss value naming nameCollisions
 
         //using ( IO.logTime "TypeGeneration" source ) <| fun _ ->
 
@@ -114,6 +102,7 @@ module TypeProvider =
       ProvidedStaticParameter( "naming" , typeof< Naming >, parameterDefaultValue = Naming.Verbatim )
       ProvidedStaticParameter( "resolutionFolder" , typeof< string >, parameterDefaultValue = "" )
       ProvidedStaticParameter( "getProperties" , typeof< bool >, parameterDefaultValue = false )
+      ProvidedStaticParameter( "nameCollisions" , typeof< NameCollisions >, parameterDefaultValue = NameCollisions.BasicSuffix )
     ]
 
     let helpText = """
@@ -123,6 +112,8 @@ module TypeProvider =
         One of: Naming.Verbatim (default), Naming.Underscores, Naming.CamelCase, Naming.PascalCase.</param>
       <param name='resolutionFolder'>A directory that is used when resolving relative file references.</param>
       <param name='getProperties'>Adds a GetProperties() method that returns a seq of all generated property name/value pairs.</param>
+      <param name='nameCollisions'>Behavior of name collisions that arise from naming strategy.
+        One of: NameCollisions.BasicSuffix (default), NameCollisions.ExtendedSuffix, NameCollisions.Omit. </param>
     """
 
     do parentType.AddXmlDoc helpText
