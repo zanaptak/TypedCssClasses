@@ -60,7 +60,7 @@ let view (model:Model) dispatch =
           tailwind.flex
           tailwind.``flex-col``
           tailwind.``items-center``
-          tailwind.``sm:flex-row``
+          tailwind.``sm:flex-row-reverse``
           tailwind.``sm:justify-around``
         ]
 
@@ -75,7 +75,6 @@ let view (model:Model) dispatch =
               tailwind.``custom-blue-button``
               tailwind.``w-02/05``
               tailwind.``sm:w-01/06``
-              tailwind.``sm:order-last``
             ]
             prop.onClick (fun _ -> dispatch Increment)
             prop.text "+"
@@ -100,7 +99,6 @@ let view (model:Model) dispatch =
               tailwind.``custom-blue-button``
               tailwind.``w-02/05``
               tailwind.``sm:w-01/06``
-              tailwind.``sm:order-first``
             ]
             prop.onClick (fun _ -> dispatch Decrement)
             prop.text "-"

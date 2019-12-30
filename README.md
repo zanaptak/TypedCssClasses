@@ -61,7 +61,7 @@ div [ ClassName <| String.concat " " [
 
 #### CSS bundle size
 
-When using a custom-generated Tailwind CSS file in your local build process, the [Tailwind documentation](https://tailwindcss.com/docs/controlling-file-size) recommends using Purgecss to reduce your CSS bundle size. With the `Naming.Verbatim` option, that technique will work with this library as well. Include your `*.fs` view files in the Purgecss content definition, and it will identify the classes you are actually using and remove unused classes from the final bundle.
+When using a custom-generated Tailwind CSS file in your local build process, the [Tailwind documentation](https://tailwindcss.com/docs/controlling-file-size) recommends using PurgeCSS to reduce your CSS bundle size. With the `Naming.Verbatim` option, that technique will work with this library as well. Include your `*.fs` view files in the PurgeCSS content definition, and it will identify the classes you are actually using and remove unused classes from the final bundle.
 
 Try it out with the [Fable Tailwind sample](https://github.com/zanaptak/TypedCssClasses/tree/master/sample/FableTailwind).
 
@@ -101,7 +101,7 @@ The source CSS to process. Can be a file path, web URL, or CSS text.
 * `Naming.CamelCase`: convert to camel case names with all non-alphanumeric characters removed.
 * `Naming.PascalCase`: convert to Pascal case names with all non-alphanumeric characters removed.
 
-Note that non-verbatim naming options can produce name collisions. See the [`nameCollisions`](#nameCollisions) parameter for details. 
+Note that non-verbatim naming options can produce name collisions. See the [`nameCollisions`](#nameCollisions) parameter for details.
 
 ### resolutionFolder
 
