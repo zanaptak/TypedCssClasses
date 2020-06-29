@@ -10,7 +10,7 @@ This sample illustrates the following concepts:
 
 * Using [PurgeCSS](https://www.purgecss.com/) to [reduce the CSS bundle size](https://tailwindcss.com/docs/controlling-file-size). In this sample, it reduces from an initial minified size of ~660KiB to a purged and minified size of ~3KiB due to the small number of CSS classes referenced.
 
-* Using [Feliz](https://github.com/Zaid-Ajaj/Feliz/) for type-safe inline styles when you don't have a CSS class available to produce the desired effect.
+* Using [Feliz](https://github.com/Zaid-Ajaj/Feliz/) for type-safe HTML and inline styles.
 
 ## Getting started
 
