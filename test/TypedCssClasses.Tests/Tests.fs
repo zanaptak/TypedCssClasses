@@ -20,7 +20,7 @@ let [< Test >] ``find classes bootstrap`` () =
     use reader = new StreamReader( resource )
     reader.ReadToEnd()
 
-  let parsed = parseCss cssToParse Naming.Verbatim NameCollisions.BasicSuffix
+  let parsed = parseCss cssToParse Naming.Verbatim NameCollisions.BasicSuffix |> Option.defaultValue [||]
 
   let refSet = Set.ofArray refClasses
   let parsedSet = parsed |> Seq.map ( fun p -> p.Value ) |> Set.ofSeq
@@ -44,7 +44,7 @@ let [< Test >] ``find classes tailwind`` () =
     use reader = new StreamReader( resource )
     reader.ReadToEnd()
 
-  let parsed = parseCss cssToParse Naming.Verbatim NameCollisions.BasicSuffix
+  let parsed = parseCss cssToParse Naming.Verbatim NameCollisions.BasicSuffix |> Option.defaultValue [||]
 
   let refSet = Set.ofArray refClasses
   let parsedSet = parsed |> Seq.map ( fun p -> p.Value ) |> Set.ofSeq
@@ -141,14 +141,14 @@ let [< Test >] ``CamelCase: suffix keyword`` () =
 
 
 let [< Test >] ``Verbatim: remove double-backticks entry`` () =
-  let parsedCss = parseCss ".abc``xyz {} .abc`xyz {} .abcxyz {}" Naming.Verbatim NameCollisions.BasicSuffix |> Seq.toList
+  let parsedCss = parseCss ".abc``xyz {} .abc`xyz {} .abcxyz {}" Naming.Verbatim NameCollisions.BasicSuffix |> Option.defaultValue [||]
   Assert.That( parsedCss , Does.Not.Contain { Name = "abc``xyz" ; Value = "abc``xyz" } )
   Assert.IsTrue( parsedCss |> Seq.exists ( fun p -> p.Name = "abcxyz" ) )
   Assert.IsTrue( parsedCss |> Seq.exists ( fun p -> p.Name = "abc`xyz" ) )
   Assert.That( parsedCss , Has.Length.EqualTo 2 )
 
 let [< Test >] ``Underscores: matching name gets non-suffixed name`` () =
-  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.Underscores NameCollisions.BasicSuffix |> Seq.toList
+  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.Underscores NameCollisions.BasicSuffix |> Option.defaultValue [||]
   Assert.That( parsedCss , Does.Contain { Name = "card_body" ; Value = "card_body" } )
   Assert.That( parsedCss , Does.Not.Contain { Name = "card_body" ; Value = "card-body" } )
   Assert.That( parsedCss , Does.Contain { Name = "card_body_2" ; Value = "card-body" } )
@@ -156,7 +156,7 @@ let [< Test >] ``Underscores: matching name gets non-suffixed name`` () =
   Assert.IsTrue( parsedCss |> Seq.exists ( fun p -> p.Name = "CardBody" ) )
 
 let [< Test >] ``PascalCase: matching name gets non-suffixed name`` () =
-  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.PascalCase NameCollisions.BasicSuffix |> Seq.toList
+  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.PascalCase NameCollisions.BasicSuffix |> Option.defaultValue [||]
   Assert.That( parsedCss , Does.Contain { Name = "CardBody" ; Value = "CardBody" } )
   Assert.That( parsedCss , Does.Not.Contain { Name = "CardBody" ; Value = "cardBody" } )
   Assert.That( parsedCss , Does.Contain { Name = "CardBody_2" ; Value = "cardBody" } )
@@ -165,7 +165,7 @@ let [< Test >] ``PascalCase: matching name gets non-suffixed name`` () =
   Assert.IsFalse( parsedCss |> Seq.exists ( fun p -> p.Name = "CardBody_5" ) )
 
 let [< Test >] ``CamelCase: matching name gets non-suffixed name`` () =
-  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.CamelCase NameCollisions.BasicSuffix |> Seq.toList
+  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.CamelCase NameCollisions.BasicSuffix |> Option.defaultValue [||]
   Assert.That( parsedCss , Does.Contain { Name = "cardBody" ; Value = "cardBody" } )
   Assert.That( parsedCss , Does.Not.Contain { Name = "cardBody" ; Value = "CardBody" } )
   Assert.That( parsedCss , Does.Contain { Name = "cardBody_2" ; Value = "CardBody" } )
@@ -174,20 +174,20 @@ let [< Test >] ``CamelCase: matching name gets non-suffixed name`` () =
   Assert.IsFalse( parsedCss |> Seq.exists ( fun p -> p.Name = "cardBody_5" ) )
 
 let [< Test >] ``unicode escapes`` () =
-  let parsedCss = parseCss @".a\:b\00216bc {} " Naming.Verbatim NameCollisions.BasicSuffix |> Seq.toList
+  let parsedCss = parseCss @".a\:b\00216bc {} " Naming.Verbatim NameCollisions.BasicSuffix |> Option.defaultValue [||]
   Assert.That( parsedCss , Does.Contain { Name = "a:bⅫc" ; Value = "a:bⅫc" } )
 
 let [< Test >] ``Underscores: extended suffix`` () =
-  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.Underscores NameCollisions.ExtendedSuffix |> Seq.toList
-  Assert.That( List.length parsedCss , Is.EqualTo 4 )
+  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.Underscores NameCollisions.ExtendedSuffix |> Option.defaultValue [||]
+  Assert.That( parsedCss.Length , Is.EqualTo 4 )
   Assert.That( parsedCss , Does.Contain { Name = "card_body__1_of_2" ; Value = "card_body" } )
   Assert.That( parsedCss , Does.Contain { Name = "card_body__2_of_2" ; Value = "card-body" } )
   Assert.IsTrue( parsedCss |> Seq.exists ( fun p -> p.Name = "cardBody" ) )
   Assert.IsTrue( parsedCss |> Seq.exists ( fun p -> p.Name = "CardBody" ) )
 
 let [< Test >] ``Underscores: extended suffix conflict with existing`` () =
-  let parsedCss = parseCss @".card_body__1_of_2 {} .card_body__2_of_2 {} .card\:body {} .card\^body {}" Naming.Underscores NameCollisions.ExtendedSuffix |> Seq.toList
-  Assert.That( List.length parsedCss , Is.EqualTo 4 )
+  let parsedCss = parseCss @".card_body__1_of_2 {} .card_body__2_of_2 {} .card\:body {} .card\^body {}" Naming.Underscores NameCollisions.ExtendedSuffix |> Option.defaultValue [||]
+  Assert.That( parsedCss.Length , Is.EqualTo 4 )
   Assert.That( parsedCss , Does.Contain { Name = "card_body__1_of_2" ; Value = "card_body__1_of_2" } )
   Assert.That( parsedCss , Does.Contain { Name = "card_body__2_of_2" ; Value = "card_body__2_of_2" } )
   // extra underscore due to conflict with existing property
@@ -195,33 +195,33 @@ let [< Test >] ``Underscores: extended suffix conflict with existing`` () =
   Assert.IsTrue( parsedCss |> Seq.exists ( fun p -> p.Name = "card_body___2_of_2" ) )
 
 let [< Test >] ``Underscores: omit`` () =
-  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.Underscores NameCollisions.Omit |> Seq.toList
-  Assert.That( List.length parsedCss , Is.EqualTo 2 )
+  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.Underscores NameCollisions.Omit |> Option.defaultValue [||]
+  Assert.That( parsedCss.Length , Is.EqualTo 2 )
   Assert.IsTrue( parsedCss |> Seq.exists ( fun p -> p.Name = "cardBody" ) )
   Assert.IsTrue( parsedCss |> Seq.exists ( fun p -> p.Name = "CardBody" ) )
   Assert.IsFalse( parsedCss |> Seq.exists ( fun p -> p.Value = "card-body" ) )
   Assert.IsFalse( parsedCss |> Seq.exists ( fun p -> p.Value = "card_body" ) )
 
 let [< Test >] ``PascalCase: extended suffix`` () =
-  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.PascalCase NameCollisions.ExtendedSuffix |> Seq.toList
-  Assert.That( List.length parsedCss , Is.EqualTo 4 )
+  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.PascalCase NameCollisions.ExtendedSuffix |> Option.defaultValue [||]
+  Assert.That( parsedCss.Length , Is.EqualTo 4 )
   Assert.That( parsedCss , Does.Contain { Name = "CardBody__1_of_4" ; Value = "CardBody" } )
   Assert.That( parsedCss , Does.Contain { Name = "CardBody__2_of_4" ; Value = "cardBody" } )
   Assert.IsTrue( parsedCss |> Seq.exists ( fun p -> p.Name = "CardBody__3_of_4" ) )
   Assert.IsTrue( parsedCss |> Seq.exists ( fun p -> p.Name = "CardBody__4_of_4" ) )
 
 let [< Test >] ``PascalCase: omit`` () =
-  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.PascalCase NameCollisions.Omit |> Seq.toList
-  Assert.That( List.length parsedCss , Is.EqualTo 0 )
+  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.PascalCase NameCollisions.Omit |> Option.defaultValue [||]
+  Assert.That( parsedCss.Length , Is.EqualTo 0 )
 
 let [< Test >] ``CamelCase: extended suffix`` () =
-  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.CamelCase NameCollisions.ExtendedSuffix |> Seq.toList
-  Assert.That( List.length parsedCss , Is.EqualTo 4 )
+  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.CamelCase NameCollisions.ExtendedSuffix |> Option.defaultValue [||]
+  Assert.That( parsedCss.Length , Is.EqualTo 4 )
   Assert.That( parsedCss , Does.Contain { Name = "cardBody__1_of_4" ; Value = "cardBody" } )
   Assert.That( parsedCss , Does.Contain { Name = "cardBody__2_of_4" ; Value = "CardBody" } )
   Assert.IsTrue( parsedCss |> Seq.exists ( fun p -> p.Name = "cardBody__3_of_4" ) )
   Assert.IsTrue( parsedCss |> Seq.exists ( fun p -> p.Name = "cardBody__4_of_4" ) )
 
 let [< Test >] ``CamelCase: omit`` () =
-  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.CamelCase NameCollisions.Omit |> Seq.toList
-  Assert.That( List.length parsedCss , Is.EqualTo 0 )
+  let parsedCss = parseCss ".card-body {} .card_body {} .cardBody {} .CardBody {}" Naming.CamelCase NameCollisions.Omit |> Option.defaultValue [||]
+  Assert.That( parsedCss.Length , Is.EqualTo 0 )

@@ -277,7 +277,6 @@ let classNamesFromSelectorText text =
 
 let classNamesFromCss text =
   text
-  |> fun t -> Regex.Replace( t , @"\s*/\*([^*]|\*(?!/))*\*/\s*" , "" , RegexOptions.None , TimeSpan.FromSeconds 5. )
   |> selectorPreludesFromCss
   |> Seq.collect classNamesFromSelectorText
   |> Seq.distinct
@@ -322,7 +321,7 @@ type ExtendedSuffixGenerator () =
     names |> Array.iter ( fun name -> nameSet.Add name |> ignore )
     names
 
-let parseCss text naming nameCollisions =
+let getPropertiesFromCss text naming nameCollisions =
 
   let transformer =
     match naming with
@@ -381,3 +380,25 @@ let parseCss text naming nameCollisions =
           |> Array.map ( fun p -> { p with Name = nameGen propName } )
       )
     Array.append sameNamesFinal differentNamesFinal
+
+let parseCss text naming nameCollisions =
+
+  // Remove comments
+  let text =
+    text
+    |> fun t -> Regex.Replace( t , @"\s*/\*([^*]|\*(?!/))*\*/\s*" , "" , RegexOptions.None , TimeSpan.FromSeconds 5. )
+
+  // Check for existence of one declaration block to indicate valid css.
+  // Used when file open fails and we are subsequently checking if file-like string is actually inline CSS.
+  // If no declarations found, we can assume it was in fact an incorrectly-specified file and report meaningful error.
+  let cssContainsBlock =
+    Regex.IsMatch(
+      text
+      , selectorsAndBlockCapture
+      , RegexOptions.IgnorePatternWhitespace ||| RegexOptions.ExplicitCapture
+      , TimeSpan.FromSeconds 5.
+    )
+
+  if cssContainsBlock then
+    getPropertiesFromCss text naming nameCollisions |> Some
+  else None

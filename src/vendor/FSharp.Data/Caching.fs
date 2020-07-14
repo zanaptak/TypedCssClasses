@@ -13,14 +13,14 @@ open System.Security.Cryptography
 open System.Text
 open Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime.IO
 
-type ICache<'TKey, 'TValue> =
-  abstract Set : key:'TKey * value:'TValue -> unit
-  abstract TryRetrieve : key:'TKey * ?extendCacheExpiration:bool -> 'TValue option
-  abstract Remove : key:'TKey -> unit
+type ICache<'TValue> =
+  abstract Set : key:string * value:'TValue -> unit
+  abstract TryRetrieve : key:string * ?extendCacheExpiration:bool -> 'TValue option
+  abstract Remove : key:string -> unit
 
 /// Creates a cache that uses in-memory collection
 let createInMemoryCache (expiration:TimeSpan) =
-    let dict = ConcurrentDictionary<'TKey_,'TValue*DateTime>()
+    let dict = ConcurrentDictionary<string,'TValue*DateTime>()
     let rec invalidationFunction key =
         async {
             do! Async.Sleep (int expiration.TotalMilliseconds)
@@ -28,13 +28,13 @@ let createInMemoryCache (expiration:TimeSpan) =
             | true, (_, timestamp) ->
                 if DateTime.UtcNow - timestamp >= expiration then
                     match dict.TryRemove(key) with
-                    | true, _ -> log (sprintf "Cache expired: %O" key)
+                    | true, _ -> logType key (sprintf "Cache expired: %O" key)
                     | _ -> ()
                 else
                     do! invalidationFunction key
             | _ -> ()
         }
-    { new ICache<_,_> with
+    { new ICache<_> with
         member __.Set(key, value) =
             dict.[key] <- (value, DateTime.UtcNow)
             invalidationFunction key |> Async.Start
@@ -47,7 +47,7 @@ let createInMemoryCache (expiration:TimeSpan) =
             | _ -> None
         member __.Remove(key) =
             match dict.TryRemove(key) with
-            | true, _ -> log (sprintf "Explicitly removed from cache: %O" key)
+            | true, _ -> logType key (sprintf "Explicitly removed from cache: %O" key)
             | _ -> ()
     }
 
@@ -85,7 +85,7 @@ let createInternetFileCache prefix expiration =
       Directory.CreateDirectory downloadCache |> ignore
 
     let cache =
-      { new ICache<string, string> with
+      { new ICache<string> with
           member __.Set(key, value) =
             let cacheFile = cacheFile key
             try File.WriteAllText(cacheFile, value)

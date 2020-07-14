@@ -81,7 +81,7 @@ type DisposableTypeProviderForNamespaces(config, ?assemblyReplacementMap) as x =
     static let mutable idCount = 0
 
     let id = idCount
-    let filesToWatch = Dictionary()
+    let filesToWatch = Dictionary< string , string list >()
 
     do idCount <- idCount + 1
 
@@ -96,7 +96,7 @@ type DisposableTypeProviderForNamespaces(config, ?assemblyReplacementMap) as x =
     do
         log (sprintf "Creating TypeProviderForNamespaces %O [%d]" x id)
         x.Disposing.Add <| fun _ ->
-            using (logTime "DisposingEvent" (sprintf "%O [%d]" x id)) <| fun _ ->
+            using (IO.logTime "DisposingEvent" (sprintf "%O [%d]" x id)) <| fun _ ->
                 dispose None
 
     member __.Id = id
@@ -105,7 +105,7 @@ type DisposableTypeProviderForNamespaces(config, ?assemblyReplacementMap) as x =
         lock filesToWatch <| fun () ->
             filesToWatch.[fullTypeName] <- path
 
-    member __.GetFileToWath(fullTypeName) =
+    member __.GetFileToWatch(fullTypeName) =
         lock filesToWatch <| fun () ->
             match filesToWatch.TryGetValue(fullTypeName) with
             | true, path -> Some path
@@ -115,23 +115,21 @@ type DisposableTypeProviderForNamespaces(config, ?assemblyReplacementMap) as x =
         lock disposeActions <| fun () -> disposeActions.Add action
 
     member __.InvalidateOneType typeName =
-        using (logTime "InvalidateOneType" (sprintf "%s in %O [%d]" typeName x id)) <| fun _ ->
+        using (IO.logTimeType typeName "InvalidateOneType" (sprintf "%s in %O [%d]" typeName x id)) <| fun _ ->
             dispose (Some typeName)
-            log (sprintf "Calling invalidate for %O [%d]" x id)
+            IO.logfType typeName "Calling invalidate for %O [%d]" x id
         base.Invalidate()
-
-#if LOGGING_ENABLED
 
     override x.Finalize() =
         log (sprintf "Finalize %O [%d]" x id)
-
-#endif
 
 // ----------------------------------------------------------------------------------------------
 
 module internal ProviderHelpers =
 
     open System.IO
+    open System.Diagnostics
+    open System.Text.RegularExpressions
     open Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime.Caching
 
     let unitsOfMeasureProvider =
@@ -153,8 +151,34 @@ module internal ProviderHelpers =
         Expr.Call(meth, [arg])
 
     let private cacheDuration = TimeSpan.FromDays 90.
-    let private invalidChars = [ for c in "\"|<>{}[]," -> c ] @ [ for i in 0..31 -> char i ] |> set
     let private webUrisCache = createInternetFileCache "Zanaptak.TypedCssClasses" cacheDuration
+    let private invalidPathChars = Set.ofArray ( Path.GetInvalidPathChars() )
+    let private invalidFileChars = Set.ofArray ( Path.GetInvalidFileNameChars() )
+
+    let private isValidFilenameSyntax str =
+      if String.IsNullOrWhiteSpace str
+        || Seq.exists invalidPathChars.Contains str
+        || String.IsNullOrWhiteSpace( Path.GetFileName str )
+        || Seq.exists invalidFileChars.Contains ( Path.GetFileName str )
+      then false
+      else true
+
+    let private pathFromFileUri ( uri : Uri ) =
+      Regex.Replace( uri.OriginalString , @"^file://" , "" , RegexOptions.None , TimeSpan.FromSeconds 5. )
+
+    let private tryGetUri fullTypeName str =
+      try
+        match Uri.TryCreate(str, UriKind.RelativeOrAbsolute) with
+        | false, _ -> None
+        | true, uri ->
+            if isWeb uri then Some uri
+            else
+              let path = if uri.IsAbsoluteUri then pathFromFileUri uri else uri.OriginalString
+              if isValidFilenameSyntax path then Some uri else None
+      with
+      | ex ->
+          IO.logfType fullTypeName "tryGetUri error, assuming non file: %A" ex
+          None
 
     // part of the information needed by generateType
     type TypeProviderSpec =
@@ -165,7 +189,9 @@ module internal ProviderHelpers =
           // the constructor from a text reader to the representation
           CreateFromTextReader : Expr<TextReader> -> Expr
           // the constructor from a text reader to an array of the representation
-          CreateFromTextReaderForSampleList : Expr<TextReader> -> Expr }
+          CreateFromTextReaderForSampleList : Expr<TextReader> -> Expr
+          WasValidInput : bool
+        }
 
     type private ParseTextResult =
         { Spec : TypeProviderSpec
@@ -199,17 +225,10 @@ module internal ProviderHelpers =
     let private parseTextAtDesignTime valueToBeParsedOrItsUri parseFunc formatName (tp:DisposableTypeProviderForNamespaces)
                                       (cfg:TypeProviderConfig) encodingStr resolutionFolder resource fullTypeName maxNumberOfRows =
 
-        using (logTime "LoadingTextToBeParsed" valueToBeParsedOrItsUri) <| fun _ ->
+        using (IO.logTimeType fullTypeName "LoadTextFromSource" fullTypeName) <| fun _ ->
 
         let tryGetResource() =
             if resource = "" then None else readResource(tp, resource)
-
-        let tryGetUri str =
-            match Uri.TryCreate(str, UriKind.RelativeOrAbsolute) with
-            | false, _ -> None
-            | true, uri ->
-                if str.Trim() = "" || not uri.IsAbsoluteUri && Seq.exists invalidChars.Contains str
-                then None else Some uri
 
         match tryGetResource() with
         | Some res -> { Spec = parseFunc "" res
@@ -217,18 +236,17 @@ module internal ProviderHelpers =
                         IsResource = true }
         | _ ->
 
-        match tryGetUri valueToBeParsedOrItsUri with
+        match tryGetUri fullTypeName valueToBeParsedOrItsUri with
         | None ->
 
             try
                 let parseResult =
-                  //using (IO.logTime "ParseSampleText" "") <| fun _ ->
                   { Spec = parseFunc "" valueToBeParsedOrItsUri
                     IsUri = false
                     IsResource = false }
                 parseResult
             with e ->
-                failwithf "The provided sample is neither a file, nor a well-formed %s: %s" formatName e.Message
+                failwithf "The provided source is neither a file, nor a well-formed %s: %s" formatName e.Message
 
         | Some uri ->
 
@@ -237,16 +255,11 @@ module internal ProviderHelpers =
                   DefaultResolutionFolder = cfg.ResolutionFolder
                   ResolutionFolder = resolutionFolder }
 
-            //log ( sprintf "Resolving source" )
-            //log ( sprintf "DefaultResolutionFolder = %s" resolver.DefaultResolutionFolder )
-            //log ( sprintf "ResolutionFolder = %s" resolver.ResolutionFolder )
-            //log ( sprintf "CurrentDirectory = %s" Environment.CurrentDirectory )
-
             let readText() =
-                let reader, toWatch = asyncRead resolver formatName encodingStr uri
+                let reader, toWatch = asyncRead fullTypeName resolver formatName encodingStr uri
                 // Non need to register file watchers in fsc.exe and fsi.exe
                 if cfg.IsInvalidationSupported  then
-                    toWatch |> Option.iter (fun path -> tp.SetFileToWatch(fullTypeName, path))
+                    toWatch |> Option.iter (fun path -> tp.SetFileToWatch(fullTypeName, [ path ]))
                 use reader = reader |> Async.RunSynchronously
                 match maxNumberOfRows with
                 | None -> reader.ReadToEnd()
@@ -265,25 +278,21 @@ module internal ProviderHelpers =
             try
 
                 let sample =
-                    //using (IO.logTime "GetTextFromUri" "") <| fun _ ->
                     if isWeb uri then
                         let text =
                             match webUrisCache.TryRetrieve(uri.OriginalString) with
                             | Some text ->
-                                log "Web URI retrieved from cache"
+                                IO.logfType fullTypeName "Web URI retrieved from cache: %s" uri.OriginalString
                                 text
                             | None ->
-                                log "Reading from web URI"
                                 let text = readText()
                                 webUrisCache.Set(uri.OriginalString, text)
                                 text
                         text
                     else
-                        log "Reading from file URI"
                         readText()
 
                 let parseResult =
-                  //using (IO.logTime "ParseTextFromUri" "") <| fun _ ->
                   { Spec = parseFunc (Path.GetExtension uri.OriginalString) sample
                     IsUri = true
                     IsResource = false }
@@ -291,21 +300,171 @@ module internal ProviderHelpers =
                 parseResult
 
             with e ->
-
                 if not uri.IsAbsoluteUri then
                     // even if it's a valid uri, it could be sample text
+                    IO.logfType fullTypeName "File read failed, attempting processing as text"
                     try
                         let parseResult =
-                          //using (IO.logTime "ParseSampleText" "") <| fun _ ->
                           { Spec = parseFunc "" valueToBeParsedOrItsUri
                             IsUri = false
                             IsResource = false }
+                        if not parseResult.Spec.WasValidInput then
+                          // backup text parse failed to match any CSS, assume it was a failed file uri
+                          failwith ""
                         parseResult
                     with _ ->
                         // if not, return the first exception
-                        failwithf "Cannot read sample %s from '%s': %s" formatName valueToBeParsedOrItsUri e.Message
+                        failwithf "Cannot read %s from '%s': %s" formatName valueToBeParsedOrItsUri e.Message
                 else
-                    failwithf "Cannot read sample %s from '%s': %s" formatName valueToBeParsedOrItsUri e.Message
+                    failwithf "Cannot read %s from '%s': %s" formatName valueToBeParsedOrItsUri e.Message
+
+    type RunCommandConfig = {
+      commandFile : string
+      argumentPrefix : string
+      argumentSuffix : string
+    }
+
+    /// Runs the command supplied to the TP and uses the output of the command as the source sample.
+    ///
+    /// Parameters:
+    /// * valueToBeParsedOrItsUri - the text which can be a sample or an uri for a sample
+    /// * commandConfig - configuration for command to run and its arguments
+    /// * parseFunc - receives the file/url extension (or ""  if not applicable) and the text value
+    /// * formatName - the description of what is being parsed (for the error message)
+    /// * tp - the type provider
+    /// * cfg - the type provider config
+    /// * resource - when specified, we first try to treat read the sample from an embedded resource
+    ///     (the value specified assembly and resource name e.g. "MyCompany.MyAssembly, some_resource.json")
+    /// * resolutionFolder - if the type provider allows to override the resolutionFolder pass it here
+    let private runCommandAtDesignTime valueToBeParsedOrItsUri ( commandConfig : RunCommandConfig ) parseFunc formatName (tp:DisposableTypeProviderForNamespaces)
+                                      (cfg:TypeProviderConfig) encodingStr resolutionFolder resource fullTypeName maxNumberOfRows =
+
+      using (IO.logTimeType fullTypeName "RunCommand" fullTypeName) <| fun _ ->
+
+      let uriResolver =
+        { ResolutionType = DesignTime
+          DefaultResolutionFolder = cfg.ResolutionFolder
+          ResolutionFolder = resolutionFolder }
+
+      let checkPathExistsLocally path =
+        match tryGetUri fullTypeName path with
+        | None -> None
+        | Some uri ->
+            try
+              match uriResolver.Resolve uri with
+              | uri , false ->
+                  // non-web uri, check if exists
+                  let resolvedPath = pathFromFileUri uri
+                  if File.Exists resolvedPath then Some resolvedPath else None
+              | _ -> None // web uri
+            with
+            | ex ->
+                IO.logfType fullTypeName "resolver error, assuming non file: %A" ex
+                None // in case of any IO error on resolve or existence check
+
+      let initialFileWatchList =
+        match checkPathExistsLocally valueToBeParsedOrItsUri with
+        | None -> []
+        | Some path -> [ path ]
+
+      let getTextFromProcess () =
+
+        let stdoutSb = StringBuilder()
+        let stderrSb = StringBuilder()
+
+        let pinfo = ProcessStartInfo( commandConfig.commandFile )
+        pinfo.UseShellExecute <- false
+        pinfo.RedirectStandardInput <- false
+        pinfo.RedirectStandardOutput <- true
+        pinfo.RedirectStandardError <- true
+        pinfo.CreateNoWindow <- true
+        pinfo.Arguments <-
+          [ commandConfig.argumentPrefix ; valueToBeParsedOrItsUri ; commandConfig.argumentSuffix ]
+          |> List.filter ( fun arg -> arg <> "" )
+          |> String.concat " "
+        pinfo.WorkingDirectory <- resolutionFolder
+        IO.logfType fullTypeName "Process filename: %s" pinfo.FileName
+        IO.logfType fullTypeName "Arguments: %s" pinfo.Arguments
+        IO.logfType fullTypeName "Working directory: %s" pinfo.WorkingDirectory
+
+        use p = new Process()
+        p.StartInfo <- pinfo
+        p.OutputDataReceived.Add( fun eventArgs ->
+          if not ( isNull eventArgs.Data ) then
+            if stdoutSb.Length = 0 then IO.logType fullTypeName "StandardOutput data started"
+            stdoutSb.AppendLine( eventArgs.Data ) |> ignore
+        )
+        p.ErrorDataReceived.Add( fun eventArgs ->
+          if not ( isNull eventArgs.Data ) then
+            if stderrSb.Length = 0 then IO.logType fullTypeName "StandardError data started"
+            stderrSb.AppendLine( eventArgs.Data ) |> ignore
+        )
+
+        p.Start() |> ignore
+        p.BeginOutputReadLine()
+        p.BeginErrorReadLine()
+        IO.logType fullTypeName "Process started"
+
+        let css =
+          if p.WaitForExit( 60000 ) then
+            IO.logType fullTypeName "Process completed"
+
+            p.WaitForExit() // flush remaining output to the data receive events
+
+            if p.ExitCode <> 0 then
+              let stderr = stderrSb.ToString()
+              failwithf "Command failed with exit code %i and stderr: %s" p.ExitCode stderr
+
+            use outReader = new StringReader( stdoutSb.ToString() )
+
+            // Check initial lines for local files to monitor for changes
+            let rec checkLine fileWatchList =
+              if outReader.Peek() < 0 then
+                ( fileWatchList , "" )
+              else
+                let line = outReader.ReadLine()
+                if line.Length > 1000 then
+                  ( fileWatchList , line )
+                else
+                  match checkPathExistsLocally line with
+                  | None ->
+                      ( fileWatchList , line )
+                  | Some path ->
+                      IO.logfType fullTypeName "Add file from command output to watch list: %s" path
+                      checkLine ( path :: fileWatchList )
+
+            let fileWatchList , firstNonFileLine = checkLine initialFileWatchList
+            let css =
+              if outReader.Peek() < 0 then firstNonFileLine
+              else firstNonFileLine + "\n" + outReader.ReadToEnd()
+
+            if css.Length > 200 then
+              IO.logfType fullTypeName "Output (200 of %i chars): %s" css.Length ( css.Substring( 0 , 200 ) )
+            else
+              IO.logfType fullTypeName "Output: %s" css
+
+            if ( cfg.IsInvalidationSupported && not ( List.isEmpty fileWatchList ) ) then
+              tp.SetFileToWatch( fullTypeName , List.distinct fileWatchList )
+
+            css
+
+          else
+            IO.logType fullTypeName "Timed out waiting for process to end"
+            try p.Kill() with ex -> IO.logfType fullTypeName "Error killing process: %A" ex
+            failwithf "Command timed out: %s %s" pinfo.FileName pinfo.Arguments
+
+        css
+
+      try
+        let sample = getTextFromProcess ()
+        let parseResult =
+          { Spec = parseFunc "" sample
+            IsUri = false
+            IsResource = false }
+        parseResult
+
+      with e ->
+        failwithf "Failed executing command '%s' for '%s': %s" commandConfig.commandFile valueToBeParsedOrItsUri e.Message
 
     let private providedTypesCache = createInMemoryCache (TimeSpan.FromSeconds 30.0)
     let private activeDisposeActions = HashSet<_>()
@@ -314,33 +473,31 @@ module internal ProviderHelpers =
     // Also cache temporarily during partial invalidation since the invalidation of one TP always causes invalidation of all TPs
     let internal getOrCreateProvidedType (cfg: TypeProviderConfig) (tp:DisposableTypeProviderForNamespaces) (fullTypeName:string) f =
 
-        //using (logTime "GeneratingProvidedType" (sprintf "%s [%d]" fullTypeName tp.Id)) <| fun _ ->
-
         let fullKey = (fullTypeName, cfg.RuntimeAssembly, cfg.ResolutionFolder, cfg.SystemRuntimeAssemblyVersion)
 
-        let setupDisposeAction providedType fileToWatch =
+        let setupDisposeAction providedType filesToWatch =
 
             if activeDisposeActions.Add(fullTypeName, tp.Id) then
 
-                log "Setting up dispose action"
+                IO.logType fullTypeName "Setting up dispose action"
 
                 let watcher =
-                    match fileToWatch with
-                    | Some file ->
+                    match filesToWatch with
+                    | Some files when not ( List.isEmpty files ) ->
                         let name = sprintf "%s [%d]" fullTypeName tp.Id
                         // Hold a weak reference to the type provider instance.  If the TP instance is leaked
                         // and not held strongly by anyone else, then don't hold it strongly here.
                         let tpref = WeakReference<_>(tp)
-                        let invalidateAction() =
+                        let invalidateAction action path =
                             match tpref.TryGetTarget() with
                             | true, tp ->
-                              log ( sprintf "Invalidating %s" name )
+                              IO.logfType fullTypeName "Invalidating %s - file %s: %s" name action path
                               tp.InvalidateOneType(fullTypeName)
                             | _ ->
-                              log "No invalidation target"
+                              IO.logfType fullTypeName "No invalidation target for %s - file %s: %s" name action path
                               ()
-                        Some (watchForChanges file (name, invalidateAction))
-                    | None -> None
+                        Some (watchForChanges fullTypeName files (name, invalidateAction))
+                    | _ -> None
 
                 // On disposal of one of the types, remove that type from the cache, and add all others to the cache
                 tp.AddDisposeAction <| fun typeNameBeingDisposedOpt ->
@@ -351,15 +508,23 @@ module internal ProviderHelpers =
                     match typeNameBeingDisposedOpt with
                     | Some typeNameBeingDisposed when fullTypeName = typeNameBeingDisposed ->
                         providedTypesCache.Remove(fullTypeName)
-                        log (sprintf "Dropping dispose action for %s [%d]" fullTypeName tp.Id)
+                        IO.logfType fullTypeName "Dropping dispose action for %s [%d]" fullTypeName tp.Id
                         // for the case where a file used by two TPs, when the file changes
                         // there will be two invalidations: A and B
                         // when the dispose action is called with A, A is removed from the cache
                         // so we need to remove the dispose action so it will won't be added when disposed is called with B
                         true
+                    | Some typeNameBeingDisposed ->
+                        IO.logfType fullTypeName "Caching %s [%d] during dispose of other type %s" fullTypeName tp.Id typeNameBeingDisposed
+                        providedTypesCache.Set(fullTypeName, (providedType, fullKey, filesToWatch))
+                        // for the case where a file used by two TPs, when the file changes
+                        // there will be two invalidations: A and B
+                        // when the dispose action is called with A, B is added to the cache
+                        // so we need to keep the dispose action around so it will be called with B and the cache is removed
+                        false
                     | _ ->
-                        log (sprintf "Caching %s [%d] for 5 minutes" fullTypeName tp.Id)
-                        providedTypesCache.Set(fullTypeName, (providedType, fullKey, fileToWatch))
+                        IO.logfType fullTypeName "Caching %s [%d] during type provider dispose" fullTypeName tp.Id
+                        providedTypesCache.Set(fullTypeName, (providedType, fullKey, filesToWatch))
                         // for the case where a file used by two TPs, when the file changes
                         // there will be two invalidations: A and B
                         // when the dispose action is called with A, B is added to the cache
@@ -368,15 +533,15 @@ module internal ProviderHelpers =
 
         match providedTypesCache.TryRetrieve(fullTypeName, true) with
         | Some (providedType, fullKey2, watchedFile) when fullKey = fullKey2 ->
-            log "Retrieved from cache"
+            IO.logType fullTypeName "Retrieve from cache"
             setupDisposeAction providedType watchedFile
             providedType
         | _ ->
             let providedType = f()
-            log "Caching for 5 minutes"
-            let fileToWatch = tp.GetFileToWath(fullTypeName)
-            providedTypesCache.Set(fullTypeName, (providedType, fullKey, fileToWatch))
-            setupDisposeAction providedType fileToWatch
+            IO.logType fullTypeName "Create new type and add to cache"
+            let filesToWatch = tp.GetFileToWatch(fullTypeName)
+            providedTypesCache.Set(fullTypeName, (providedType, fullKey, filesToWatch))
+            setupDisposeAction providedType filesToWatch
             providedType
 
     type Source =
@@ -395,7 +560,7 @@ module internal ProviderHelpers =
     ///     (the value specifies assembly and resource name e.g. "MyCompany.MyAssembly, some_resource.json")
     /// * fullTypeName - the full name of the type provider, this will be used as the caching key
     /// * maxNumberOfRows - the max number of rows to read from the sample or schema
-    let generateType formatName source getSpec
+    let generateType_orig formatName source getSpec
                      (tp:DisposableTypeProviderForNamespaces) (cfg:TypeProviderConfig)
                      encodingStr resolutionFolder resource fullTypeName maxNumberOfRows  =
 
@@ -418,7 +583,7 @@ module internal ProviderHelpers =
         let resultType = spec.RepresentationType
         let resultTypeAsync = typedefof<Async<_>>.MakeGenericType(resultType)
 
-        //using (logTime "CommonTypeGeneration" valueToBeParsedOrItsUri) <| fun _ ->
+        //using (IO.logTime "CommonTypeGeneration" valueToBeParsedOrItsUri) <| fun _ ->
 
         [ // Generate static Parse method
           let args = [ ProvidedParameter("text", typeof<string>) ]
@@ -534,30 +699,41 @@ module internal ProviderHelpers =
 
         spec.GeneratedType
 
-    let generateType' formatName source getSpec
+    // Modified version of original generateType function to process CSS and create type
+    let generateType formatName source getSpec ( commandConfig : RunCommandConfig option )
                      (tp:DisposableTypeProviderForNamespaces) (cfg:TypeProviderConfig)
                      encodingStr resolutionFolder resource fullTypeName maxNumberOfRows  =
 
-        getOrCreateProvidedType cfg tp fullTypeName <| fun () ->
+        using ( IO.logTimeType fullTypeName "GenerateType" fullTypeName ) <| fun _ ->
 
-        let isRunningInFSI = cfg.IsHostedExecution
-        let defaultResolutionFolder = cfg.ResolutionFolder
+        let createProvidedTypeFromData () =
 
-        let valueToBeParsedOrItsUri =
-            match source with
-            | Sample value -> value
-            | SampleList value -> value
-            | Schema value -> value
+          let valueToBeParsedOrItsUri =
+              match source with
+              | Sample value -> value
+              | SampleList value -> value
+              | Schema value -> value
 
-        let parseResult =
-            parseTextAtDesignTime valueToBeParsedOrItsUri getSpec formatName tp cfg encodingStr resolutionFolder resource fullTypeName maxNumberOfRows
+          let parseResult =
+            match commandConfig with
+            | Some commandConfig ->
+                runCommandAtDesignTime valueToBeParsedOrItsUri commandConfig getSpec formatName tp cfg encodingStr resolutionFolder resource fullTypeName maxNumberOfRows
+            | None ->
+                parseTextAtDesignTime valueToBeParsedOrItsUri getSpec formatName tp cfg encodingStr resolutionFolder resource fullTypeName maxNumberOfRows
 
-        let spec = parseResult.Spec
+          let spec = parseResult.Spec
 
-        let resultType = spec.RepresentationType
-        let resultTypeAsync = typedefof<Async<_>>.MakeGenericType(resultType)
+          let resultType = spec.RepresentationType
+          let resultTypeAsync = typedefof<Async<_>>.MakeGenericType(resultType)
 
-        spec.GeneratedType
+          spec.GeneratedType
+
+        try
+          getOrCreateProvidedType cfg tp fullTypeName createProvidedTypeFromData
+        with ex ->
+          IO.logfType fullTypeName "Error: %A" ex
+          reraise ()
+
 
 #if INTERNALS_VISIBLE
 open System.Runtime.CompilerServices

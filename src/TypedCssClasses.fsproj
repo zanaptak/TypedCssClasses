@@ -1,9 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;net452</TargetFrameworks>
+    <TargetFramework>netstandard2.0</TargetFramework>
     <DisableImplicitSystemValueTupleReference>true</DisableImplicitSystemValueTupleReference>
-    <Version>0.2.0</Version>
+    <Configurations>Debug;Release;ReleaseTest</Configurations>
+    <VersionPrefix>0.3.0</VersionPrefix>
+    <VersionSuffix></VersionSuffix>
     <PackageId>Zanaptak.TypedCssClasses</PackageId>
     <Authors>zanaptak</Authors>
     <Product>Zanaptak.TypedCssClasses</Product>
@@ -12,18 +14,16 @@
     <Description>A CSS class type provider for F# web development. Bring external stylesheet classes into your F# code as design-time discoverable compiler-verified properties.</Description>
     <AssemblyName>Zanaptak.TypedCssClasses</AssemblyName>
     <PackageProjectUrl>https://github.com/zanaptak/TypedCssClasses</PackageProjectUrl>
-    <Configurations>Debug;Release;ReleaseTest;DebugLog</Configurations>
+    <PackageReleaseNotes>https://github.com/zanaptak/TypedCssClasses/releases</PackageReleaseNotes>
     <RepositoryUrl>https://github.com/zanaptak/TypedCssClasses.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageReleaseNotes>https://github.com/zanaptak/TypedCssClasses/releases</PackageReleaseNotes>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <DefineConstants>TRACE;INTERNALS_VISIBLE</DefineConstants>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugLog|AnyCPU'">
-    <DefineConstants>TRACE;INTERNALS_VISIBLE;LOGGING_ENABLED;TIMESTAMPS_IN_LOG</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseTest|AnyCPU'">
@@ -64,6 +64,7 @@
 
   <ItemGroup>
     <PackageReference Update="FSharp.Core" Version="4.3.4" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.0.0" PrivateAssets="All" />
   </ItemGroup>
 
 </Project>

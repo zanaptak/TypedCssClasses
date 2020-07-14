@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>preview</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="folder\folder1.css" />
+    <Content Include="folder\folder2.css" />
+    <Compile Include="folder\folder.fs" />
+    <Content Include="import\import1.css" />
+    <Content Include="import\import2.css" />
+    <None Include="import\import.js" />
+    <Compile Include="import\import.fs" />
+    <Content Include="sass\sass.sass" />
+    <Compile Include="sass\sass.fs" />
+    <Content Include="main.css" />
+    <Compile Include="main.fs" />
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <PackageReference Include="Fable.Core" Version="3.1.5" />
+    <PackageReference Include="Fable.Elmish.React" Version="3.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Zanaptak.TypedCssClasses">
+      <HintPath>..\..\..\src\bin\Debug\netstandard2.0\Zanaptak.TypedCssClasses.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Update="FSharp.Core" Version="4.7.2" />
+  </ItemGroup>
+</Project>

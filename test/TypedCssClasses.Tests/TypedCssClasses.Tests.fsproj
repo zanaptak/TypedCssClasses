@@ -4,7 +4,7 @@
     <TargetFramework>netcoreapp3.1</TargetFramework>
     <IsPackable>false</IsPackable>
     <GenerateProgramFile>true</GenerateProgramFile>
-    <Configurations>Debug;Release;ReleaseTest;DebugLog</Configurations>
+    <Configurations>Debug;Release;ReleaseTest</Configurations>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,12 +27,6 @@
   <ItemGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <Reference Include="Zanaptak.TypedCssClasses">
       <HintPath>..\..\src\bin\Debug\netstandard2.0\Zanaptak.TypedCssClasses.dll</HintPath>
-    </Reference>
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(Configuration)|$(Platform)'=='DebugLog|AnyCPU'">
-    <Reference Include="Zanaptak.TypedCssClasses">
-      <HintPath>..\..\src\bin\DebugLog\netstandard2.0\Zanaptak.TypedCssClasses.dll</HintPath>
     </Reference>
   </ItemGroup>
 
