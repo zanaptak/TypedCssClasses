@@ -63,7 +63,7 @@ div [ ClassName <| String.concat " " [
 
 ## Samples
 
-Check out the [Fable Tailwind sample](https://github.com/zanaptak/TypedCssClasses/tree/master/sample/FableTailwind) to see it in action. Shows the use of a local Tailwind CSS configuration that is customized, purged, and minified.
+Check out the [Fable Tailwind sample](https://github.com/zanaptak/TypedCssClasses/tree/master/sample/FableTailwind) to see it in action. Demonstrates the use of a local Tailwind CSS setup that is customized, purged, and minified.
 
 ## Getting started
 
@@ -103,17 +103,17 @@ type css =
 
 The command can be an executable file in your PATH, a file path relative to the resolution folder (see [`resolutionFolder`](#resolutionfolder) parameter), or an absolute path. The working directory of the process will be the resolution folder of the type provider. On Windows, the .exe extension can be omitted, but other extensions such as .cmd/.bat must be specified.
 
-The `source` parameter will be passed as an argument to the command. The the standard output returned by the command will be used as the CSS data for extracting class names. A non-zero exit code returned by the command indicates an error and the standard error text will be reported as an exception.
+The `source` parameter will be passed as an argument to the command. The standard output returned by the command will be used as the CSS data for extracting class names. A non-zero exit code returned by the command indicates an error and the standard error text will be reported as an exception.
 
 In addition to the CSS output, the command can optionally return leading lines to indicate additional files to watch beyond the `source` parameter (see [File watching](#file-watching) section below), such as Sass partials. Any initial full line that exactly matches a local path will be interpreted as a file to watch; the type provider will only start processing CSS on the first line that doesn't match a local path. You would likely accomplish this via custom scripts; see the sample projects for examples.
 
-Two additional paramaters are available to further customize the command: `argumentPrefix` and `argumentSuffix`. If specified, these strings will be placed before and after the `source` argument, seperated by a space. That is, the eventaul command executed will be the result of the following parameters:
+Two additional parameters are available to further customize the command: `argumentPrefix` and `argumentSuffix`. If specified, these strings will be placed before and after the `source` argument, separated by a space. That is, the full command will be the result of the following parameters:
 
 ```
 commandFile [argumentPrefix ][source][ argumentSuffix]
 ```
 
-Source and arguments are concatenated as-is (after OS-specific and environment variable consideratons described below); you are responsible for any quoting or escaping if necessary.
+Source and arguments are concatenated as-is (after OS-specific and environment variable processing described below); you are responsible for any quoting or escaping if necessary.
 
 ## Multiple development environments
 
@@ -132,7 +132,7 @@ Supported values are (case-insensitive): `FREEBSD`, `LINUX`, `OSX`, and `WINDOWS
 
 If this syntax conflicts with your parameter values, you can use the `osDelimiters` parameter. It takes a two-character string specifying alternatives for the comma and the equals sign in that order, or an empty string to disable OS parsing.
 
-## Enviroment variables
+## Environment variables
 
 You can use environment variables in parameters using `%VARIABLE%` syntax. Note that the Windows-style `%...%` syntax must be used, even for non-Windows systems (e.g. Linux must use `%HOME%` rather than `$HOME`). Variables not found in the environment will not be processed and the original syntax will be left in the string.
 
@@ -219,7 +219,7 @@ An argument string to include after the `source` parameter, separated by a space
 
 ### osDelimiters
 
-A two-character string specifying the delimiter characters used to indicate operating system-specific parameter values. Default is ",=" as in `defaultvalue,OS1=value1,OS2=value2`. If set to empty string, disables parsing for OS values.
+A two-character string specifying the delimiter characters used to indicate operating system-specific parameter values. Default is `,=` as in `defaultvalue,OS1=value1,OS2=value2`. If set to empty string, disables parsing for OS values.
 
 Applies to parameters: `source`, `resolutionFolder`, `logFile`, `commandFile`, `argumentPrefix`, `argumentSuffix`
 
