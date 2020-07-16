@@ -1,8 +1,5 @@
 @tailwind base;
-
 @tailwind components;
-
-/* add custom component classes before utilities -- https://tailwindcss.com/docs/extracting-components */
 
 .custom-blue-button {
   @apply bg-blue-500 text-white text-lg font-bold py-02 px-04 rounded-full border-2 border-blue-500
@@ -15,5 +12,8 @@
 .custom-blue-button:focus {
   @apply outline-none border-blue-700
 }
+
+/* Add custom component classes above this line -- before tailwind utilities */
+/* See https://tailwindcss.com/docs/extracting-components/#extracting-css-components-with-apply */
 
 @tailwind utilities;

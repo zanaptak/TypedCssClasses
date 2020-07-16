@@ -3,14 +3,13 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
 VisualStudioVersion = 16.0.29123.88
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "App", "src\App.fsproj", "{E842D90F-BD83-4DB4-BC96-459B3D772A03}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "FableTailwind", "src\FableTailwind.fsproj", "{E842D90F-BD83-4DB4-BC96-459B3D772A03}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{3E6CCADF-250E-4646-84F3-3BEE70E243D4}"
 	ProjectSection(SolutionItems) = preProject
 		package.json = package.json
 		postcss.config.js = postcss.config.js
 		README.md = README.md
-		css\tailwind-generated.css = css\tailwind-generated.css
 		css\tailwind-source.css = css\tailwind-source.css
 		tailwind.config.js = tailwind.config.js
 		webpack.config.js = webpack.config.js

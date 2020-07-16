@@ -1,10 +1,15 @@
-const postcss = require( 'postcss' )
-const postcssImport = require( 'postcss-import' )
 const fs = require( 'fs' )
-const inputFile = fs.realpathSync( process.argv[ 2 ] )
+
+const tailwindConfigFile = fs.realpathSync( process.argv[ 2 ] )
+const inputFile = fs.realpathSync( process.argv[ 3 ] )
+
+const postcss = require( 'postcss' )
+const tailwindcss = require( 'tailwindcss' )( tailwindConfigFile )
+
 const css = fs.readFileSync( inputFile )
+
 postcss()
-  .use( postcssImport )
+  .use( tailwindcss )
   .process( css , { from: inputFile } )
   .then( result => {
     // write included files as leading output lines
