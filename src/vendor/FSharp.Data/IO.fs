@@ -17,6 +17,7 @@ open Zanaptak.TypedCssClasses.Internal.FSharp.Data
 let private logLock = obj()
 let mutable private indentation = 0
 let private logFileTypePaths = ConcurrentDictionary< string , string >()
+let private processId = System.Diagnostics.Process.GetCurrentProcess().Id
 
 let internal enableLogType typeName filePath =
   logFileTypePaths.AddOrUpdate( typeName , filePath , fun _ _ -> filePath ) |> ignore
@@ -39,9 +40,12 @@ let private appendToLogType typeName line =
 
 let internal logType typeName str =
   if isLogEnabledType typeName then
-    DateTime.Now.ToString( "yyyy-MM-dd HH:mm:ss.fff" ) +
-      " [" + Threading.Thread.CurrentThread.ManagedThreadId.ToString() + "]" +
-      " " + String(' ', indentation * 2) + str
+    sprintf "%s [%i][%i] %s %s"
+      ( DateTime.Now.ToString( "yyyy-MM-dd HH:mm:ss.fff" ) )
+      processId
+      Threading.Thread.CurrentThread.ManagedThreadId
+      ( String(' ', indentation * 4) )
+      str
     |> appendToLogType typeName
 
 let internal logfType typeName fmt = Printf.kprintf ( logType typeName ) fmt
