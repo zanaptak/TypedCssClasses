@@ -1,4 +1,4 @@
-# TypedCssClasses
+# TypedCssClasses [![Nuget](https://img.shields.io/nuget/v/Zanaptak.TypedCssClasses)](https://www.nuget.org/packages/Zanaptak.TypedCssClasses/)
 
 A CSS class type provider for F# web development.
 
@@ -63,8 +63,11 @@ div [ ClassName <| String.concat " " [
 
 ## Samples
 
-Check out the [Fable Tailwind sample](https://github.com/zanaptak/TypedCssClasses/tree/master/sample/FableTailwind) to see it in action. Demonstrates the use of a local Tailwind CSS setup that is customized, purged, and minified.
+- [Fable Sass sample](https://github.com/zanaptak/TypedCssClasses/tree/master/sample/FableSass) - Demonstrates the use of Sass compilation with partial/module loading.
 
+- [Fable Tailwind sample](https://github.com/zanaptak/TypedCssClasses/tree/master/sample/FableTailwind) - Demonstrates the use of a local Tailwind CSS setup that is customized, purged, and minified.
+
+ 
 ## Getting started
 
 Add the [NuGet package](https://www.nuget.org/packages/Zanaptak.TypedCssClasses) to your project:
@@ -236,3 +239,5 @@ This type provider does not use formal CSS parsing, just identifying classes by 
 Web URLs are expected to use static CDN or otherwise unchanging content and are cached on the local filesystem with a 90-day expiration.
 
 If using Fable, update fable-compiler to version 2.3.17 or later to avoid an issue with the type provider failing to resolve relative file paths.
+
+CSS `@import` rules are not processed by default. If desired, they can be processed via external command; see the [TestWithFable test project](https://github.com/zanaptak/TypedCssClasses/tree/master/test/TestWithFable) for an example using [PostCSS](https://postcss.org/).

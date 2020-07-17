@@ -18,6 +18,8 @@ Install [.NET Core SDK](https://dotnet.microsoft.com/download).
 
 Install [Node.js](https://nodejs.org/).
 
+Run `dotnet restore`.
+
 Run `npm install`.
 
 Run `npm start`, and then browse to `http://localhost:8080`. You should get a counter with rounded blue buttons styled with Tailwind CSS.
@@ -30,7 +32,7 @@ Optionally, run `npm run build` to produce a production deployment version.
 
   The application code, including the view code where type-safe CSS classes are used. The application uses [Elmish](https://elmish.github.io/elmish/) architecture.
 
-  In the code, note the `type tailwind = CssClasses<...>` declaration for the TypedCssClasses type provider, the `tailwind`-prefixed CSS class properties (via TypedCssClasses), and the `style`-prefixed inline styles (via Feliz).
+  In the code, note the `type tailwind = CssClasses<...>` declaration for the TypedCssClasses type provider and the `tailwind`-prefixed CSS class properties.
 
 * `css/tailwind-source.css`
 
