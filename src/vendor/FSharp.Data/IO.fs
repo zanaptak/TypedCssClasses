@@ -1,9 +1,9 @@
 //
-// Modified for Zanaptak.TypedCssClasses by zanaptak.
+// Adapted from FSharp.Data for Zanaptak.TypedCssClasses by zanaptak.
 //
 
 /// Helper functions called from the generated code for working with files
-module internal Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime.IO
+module internal Zanaptak.TypedCssClasses.Internal.FSharpData.IO
 
 open System
 open System.Collections.Generic
@@ -12,11 +12,11 @@ open System.IO
 open System.Text
 open System.Diagnostics
 open System.Threading
-open Zanaptak.TypedCssClasses.Internal.FSharp.Data
+open Zanaptak.TypedCssClasses.Internal.FSharpData.Http
 
 let private logLock = obj()
-let mutable private indentation = 0
 let private logFileTypePaths = ConcurrentDictionary< string , string >()
+let private logTypeIndentations = ConcurrentDictionary< string , int >()
 let private processId = System.Diagnostics.Process.GetCurrentProcess().Id
 
 let internal enableLogType typeName filePath =
@@ -38,17 +38,23 @@ let private appendToLogMultipleType typeName lines = lock logLock <| fun () ->
 let private appendToLogType typeName line =
     appendToLogMultipleType typeName [line]
 
-let internal logType typeName str =
+let internal logType typeName ( tpInstance : int ) str =
   if isLogEnabledType typeName then
-    sprintf "%s [%i][%i] %s %s"
+    let indentation =
+      match logTypeIndentations.TryGetValue typeName with
+      | true , value -> value
+      | _ -> 0
+
+    sprintf "%s [%i][%i][%i] %s %s"
       ( DateTime.Now.ToString( "yyyy-MM-dd HH:mm:ss.fff" ) )
       processId
-      Threading.Thread.CurrentThread.ManagedThreadId
+      tpInstance
+      Thread.CurrentThread.ManagedThreadId
       ( String(' ', indentation * 4) )
       str
     |> appendToLogType typeName
 
-let internal logfType typeName fmt = Printf.kprintf ( logType typeName ) fmt
+let internal logfType typeName tpInstance fmt = Printf.kprintf ( logType typeName tpInstance ) fmt
 
 let internal logWithStackTraceType typeName (str:string) =
   if isLogEnabledType typeName then
@@ -62,17 +68,17 @@ let internal logWithStackTraceType typeName (str:string) =
 
 let internal dummyDisposable = { new IDisposable with member __.Dispose() = () }
 
-let internal logTimeType typeName category (instance:string) =
+let internal logTimeType typeName tpInstance category (instance:string) =
   if isLogEnabledType typeName then
-    logfType typeName "%s %s" category instance
-    Interlocked.Increment &indentation |> ignore
+    logfType typeName tpInstance "%s %s" category instance
+    logTypeIndentations.AddOrUpdate( typeName , 1 , fun _ value -> value + 1 ) |> ignore
     let s = Stopwatch()
     s.Start()
     { new IDisposable with
         member __.Dispose() =
             s.Stop()
-            Interlocked.Decrement &indentation |> ignore
-            logfType typeName "Finished %s [%dms]" category s.ElapsedMilliseconds
+            logTypeIndentations.AddOrUpdate( typeName , 0 , fun _ value -> value - 1 ) |> ignore
+            logfType typeName tpInstance "Finished %s [%dms]" category s.ElapsedMilliseconds
     }
   else dummyDisposable
 
@@ -113,14 +119,14 @@ type private FileWatcher(path) =
     member __.Subscribe(name, action) =
         subscriptions.Add(name, action)
 
-    member __.Unsubscribe(fullTypeName, name) =
+    member __.Unsubscribe(fullTypeName, tpInstance, name) =
         if subscriptions.Remove(name) then
-            logfType fullTypeName "Unsubscribed %s from %s watcher" name path
             if subscriptions.Count = 0 then
-                logfType fullTypeName "Disposing %s watcher" path
+                logfType fullTypeName tpInstance "Disposing watcher on %s" path
                 watcher.Dispose()
                 true
             else
+                logfType fullTypeName tpInstance "Unsubscribing watcher on %s" path
                 false
         else
             false
@@ -128,7 +134,7 @@ type private FileWatcher(path) =
 let private watchers = Dictionary<string, FileWatcher>()
 
 // sets up a filesystem watcher that calls the invalidate function whenever the file changes
-let watchForChanges fullTypeName paths (owner, onChange) =
+let watchForChanges fullTypeName tpInstance paths (owner, onChange) =
 
     let watcherPathSubs =
 
@@ -138,11 +144,11 @@ let watchForChanges fullTypeName paths (owner, onChange) =
             paths |> List.iter( fun path ->
               match watchers.TryGetValue(path) with
               | true, watcher ->
-                  logfType fullTypeName "Reusing %s watcher" path
+                  logfType fullTypeName tpInstance "Reusing watcher on %s" path
                   watcher.Subscribe(owner, onChange)
                   subbedWatchers.Add ( watcher , path )
               | false, _ ->
-                  logfType fullTypeName "Setting up %s watcher" path
+                  logfType fullTypeName tpInstance "Creating watcher on %s" path
                   let watcher = FileWatcher path
                   watcher.Subscribe(owner, onChange)
                   watchers.Add(path, watcher)
@@ -155,7 +161,7 @@ let watchForChanges fullTypeName paths (owner, onChange) =
         member __.Dispose() =
             lock watchers <| fun () ->
                 watcherPathSubs |> List.iter ( fun ( watcher , path ) ->
-                  if watcher.Unsubscribe(fullTypeName, owner) then
+                  if watcher.Unsubscribe(fullTypeName, tpInstance, owner) then
                       watchers.Remove(path) |> ignore
                 )
     }
@@ -214,7 +220,7 @@ type internal UriResolver =
 /// Opens a stream to the uri using the uriResolver resolution rules
 /// It the uri is a file, uses shared read, so it works when the file locked by Excel or similar tools,
 /// and sets up a filesystem watcher that calls the invalidate function whenever the file changes
-let internal asyncRead fullTypeName (uriResolver:UriResolver) formatName encodingStr (uri:Uri) =
+let internal asyncRead fullTypeName tpInstance (uriResolver:UriResolver) formatName encodingStr (uri:Uri) =
   let uri, isWeb = uriResolver.Resolve uri
   if isWeb then
     async {
@@ -230,34 +236,15 @@ let internal asyncRead fullTypeName (uriResolver:UriResolver) formatName encodin
         let headers = [ HttpRequestHeaders.UserAgent ("F# Data " + formatName + " Type Provider")
                         HttpRequestHeaders.Accept (String.concat ", " contentTypes) ]
         // Download the whole web resource at once, otherwise with some servers we won't get the full file
-        logfType fullTypeName "Reading from web URI: %s" uri.OriginalString
+        logfType fullTypeName tpInstance "Reading from web URI: %s" uri.OriginalString
         let! text = Http.AsyncRequestString(uri.OriginalString, headers = headers, responseEncodingOverride = encodingStr)
         return new StringReader(text) :> TextReader
     }, None
   else
     let path = uri.OriginalString.Replace(Uri.UriSchemeFile + "://", "")
-    logfType fullTypeName "Reading from file: %s" path
+    logfType fullTypeName tpInstance "Reading from file: %s" path
     async {
         let file = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)
         let encoding = if encodingStr = "" then Encoding.UTF8 else HttpEncodings.getEncoding encodingStr
         return new StreamReader(file, encoding) :> TextReader
     }, Some path
-
-let private withUri uri f =
-  match Uri.TryCreate(uri, UriKind.RelativeOrAbsolute) with
-  | false, _ -> failwithf "Invalid uri: %s" uri
-  | true, uri -> f uri
-
-/// Returns a TextReader for the uri using the runtime resolution rules
-let asyncReadTextAtRuntime forFSI defaultResolutionFolder resolutionFolder formatName encodingStr uri =
-  withUri uri <| fun uri ->
-    let resolver = UriResolver.Create((if forFSI then RuntimeInFSI else Runtime),
-                                      defaultResolutionFolder, resolutionFolder)
-    asyncRead "NOTIMPLEMENTED" resolver formatName encodingStr uri |> fst
-
-/// Returns a TextReader for the uri using the designtime resolution rules
-let asyncReadTextAtRuntimeWithDesignTimeRules defaultResolutionFolder resolutionFolder formatName encodingStr uri =
-  withUri uri <| fun uri ->
-    let resolver = UriResolver.Create(DesignTime, defaultResolutionFolder, resolutionFolder)
-    asyncRead "NOTIMPLEMENTED" resolver formatName encodingStr uri |> fst
-

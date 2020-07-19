@@ -1,9 +1,9 @@
 //
-// Modified for Zanaptak.TypedCssClasses by zanaptak.
+// Adapted from FSharp.Data for Zanaptak.TypedCssClasses by zanaptak.
 //
 
 /// Implements caching using in-memory and local file system
-module internal Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime.Caching
+module internal Zanaptak.TypedCssClasses.Internal.FSharpData.Caching
 
 open System
 open System.Collections.Concurrent
@@ -11,7 +11,7 @@ open System.Diagnostics
 open System.IO
 open System.Security.Cryptography
 open System.Text
-open Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime.IO
+open Zanaptak.TypedCssClasses.Internal.FSharpData.IO
 
 type ICache<'TValue> =
   abstract Set : key:string * value:'TValue -> unit
@@ -28,7 +28,7 @@ let createInMemoryCache (expiration:TimeSpan) =
             | true, (_, timestamp) ->
                 if DateTime.UtcNow - timestamp >= expiration then
                     match dict.TryRemove(key) with
-                    | true, _ -> logType key (sprintf "Cache expired: %O" key)
+                    | true, _ -> log (sprintf "Cache expired: %O" key)
                     | _ -> ()
                 else
                     do! invalidationFunction key
@@ -47,7 +47,7 @@ let createInMemoryCache (expiration:TimeSpan) =
             | _ -> None
         member __.Remove(key) =
             match dict.TryRemove(key) with
-            | true, _ -> logType key (sprintf "Explicitly removed from cache: %O" key)
+            | true, _ -> log (sprintf "Explicitly removed from cache: %O" key)
             | _ -> ()
     }
 

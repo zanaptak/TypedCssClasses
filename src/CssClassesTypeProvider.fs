@@ -1,9 +1,9 @@
 namespace Zanaptak.TypedCssClasses
 
-open Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime
-open Zanaptak.TypedCssClasses.Internal.ProviderImplementation
+open Zanaptak.TypedCssClasses.Internal.FSharpData.Helpers
+open Zanaptak.TypedCssClasses.Internal.FSharpData.IO
+open Zanaptak.TypedCssClasses.Internal.FSharpData.ProvidedTypes
 open Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
-open Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProviderHelpers
 open FSharp.Core.CompilerServices
 open System
 open System.Reflection
@@ -12,105 +12,21 @@ open System.IO
 
 module TypeProvider =
 
-  let private addTypeMembersFromCss getProperties ( cssClasses : Utils.Property [] option ) ( cssType : ProvidedTypeDefinition ) =
-
-    let cssClasses = cssClasses |> Option.defaultValue [||]
-
-    cssClasses
-    |> Array.iter ( fun c ->
-      let propName , propValue = c.Name , c.Value
-      let prop = ProvidedProperty( propName , typeof< string > , isStatic = true , getterCode = ( fun _ -> <@@ propValue @@> ) )
-      prop.AddXmlDoc( Utils.escapeHtml propValue )
-      cssType.AddMember prop
-    )
-
-    if getProperties then
-      let rowType = ProvidedTypeDefinition("Property", Some(typeof<string[]>), hideObjectMethods = true)
-      let rowNameProp = ProvidedProperty("Name", typeof<string>, getterCode = fun (Singleton row) -> <@@ (%%row:string[]).[0] @@>)
-      rowNameProp.AddXmlDoc "Generated property name using specified naming strategy."
-      let rowValueProp = ProvidedProperty("Value", typeof<string>, getterCode = fun (Singleton row) -> <@@ (%%row:string[]).[1] @@>)
-      rowValueProp.AddXmlDoc "The underlying CSS class value."
-
-      rowType.AddMember rowNameProp
-      rowType.AddMember rowValueProp
-      cssType.AddMember rowType
-
-      let propsArray = cssClasses |> Array.map ( fun p -> [| p.Name ; p.Value |] )
-      let usedNames = cssClasses |> Array.map ( fun p -> p.Name ) |> Set.ofArray
-      let methodName =
-        Seq.init 99 ( fun i -> "GetProperties" + if i = 0 then "" else "_" + string ( i + 1 ) )
-        |> Seq.find ( fun s -> usedNames |> Set.contains s |> not )
-      let staticMethod =
-        ProvidedMethod(methodName, [], typedefof<seq<_>>.MakeGenericType(rowType), isStatic = true,
-          invokeCode = fun _-> <@@ propsArray @@>)
-
-      cssType.AddMember staticMethod
-
-  // Hard-coded since we know we are targeting netstandard2.0
-  // https://docs.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.osplatform.create?view=netstandard-2.0
-  let validPlatforms = set [ "FREEBSD" ; "LINUX" ; "OSX" ; "WINDOWS" ]
-
-  let private platformSpecific ( delimiters : string ) ( text : string ) =
-    if String.IsNullOrWhiteSpace delimiters then text
-    else
-      let delimiters = delimiters.Trim()
-      let outerDelimiter = delimiters.[ 0 ]
-      let innerDelimiter = if delimiters.Length = 1 then '=' else delimiters.[ 1 ]
-      let segments = text.Split( outerDelimiter );
-      if Array.length segments = 1 then Array.head segments
-      else
-        let platformValueTuples =
-          segments
-          |> Array.map ( fun segment ->
-              match segment.Split( [| innerDelimiter |] , 2 ) with
-              | [| platform ; value |] ->
-                  let platform = platform.Trim().ToUpperInvariant()
-                  if Set.contains platform validPlatforms then
-                    platform , value
-                  else
-                    "" , segment
-              | _ -> "" , segment
-          )
-
-        // First check for at least one valid platform string.
-        // Else assume accidental syntax match and return original whole string.
-        if Array.exists ( fun ( plat , _ ) -> plat <> "" ) platformValueTuples then
-          platformValueTuples
-          |> Array.tryFind ( fun ( plat , _ ) ->
-              // Find first for current platform
-              plat <> "" && RuntimeInformation.IsOSPlatform ( OSPlatform.Create( plat ) )
-          )
-          |> Option.orElseWith ( fun () ->
-              // Else find first with non specified platform
-              platformValueTuples |> Array.tryFind ( fun ( plat , _ ) -> plat = "" )
-          )
-          |> Option.orElseWith ( fun () ->
-              // Else use first regardless of platform specifier
-              Array.tryHead platformValueTuples
-          )
-          |> Option.map snd
-          |> Option.defaultValue ""
-
-        else
-          text
 
   [< TypeProvider >]
   type CssClassesTypeProvider ( config : TypeProviderConfig ) as this =
     inherit DisposableTypeProviderForNamespaces( config )
 
     let ctorLog = ResizeArray< string >()
+    let proc = System.Diagnostics.Process.GetCurrentProcess()
     do
-      ctorLog.Add "======== CssClassesTypeProvider config ========"
+      ctorLog.Add ( sprintf "Environment.CommandLine: %s" Environment.CommandLine )
+      ctorLog.Add ( sprintf "Environment.CurrentDirectory: %s" Environment.CurrentDirectory )
       ctorLog.Add ( sprintf "TypeProviderConfig.RuntimeAssembly: %s" config.RuntimeAssembly )
       ctorLog.Add ( sprintf "TypeProviderConfig.ResolutionFolder: %s" ( if isNull config.ResolutionFolder then "<null>" else config.ResolutionFolder ) )
       ctorLog.Add ( sprintf "TypeProviderConfig.IsHostedExecution: %b" config.IsHostedExecution )
       ctorLog.Add ( sprintf "TypeProviderConfig.IsInvalidationSupported: %b" config.IsInvalidationSupported )
       ctorLog.Add ( sprintf "TypeProviderConfig.TemporaryFolder: %s" config.TemporaryFolder )
-      let proc = System.Diagnostics.Process.GetCurrentProcess()
-      ctorLog.Add ( sprintf "Process: [%i] %s" proc.Id proc.ProcessName )
-      ctorLog.Add ( sprintf "Environment.CommandLine: %s" Environment.CommandLine )
-      ctorLog.Add ( sprintf "Environment.CurrentDirectory: %s" Environment.CurrentDirectory )
-      ctorLog.Add "-----------------------------------------------"
 
     let ns = "Zanaptak.TypedCssClasses"
     let asm = Assembly.GetExecutingAssembly()
@@ -124,7 +40,7 @@ module TypeProvider =
 
       let processStringParameter ( arg : obj ) =
         arg :?> string
-        |> platformSpecific osDelimiters
+        |> Utils.platformSpecific osDelimiters
         |> fun s -> if expandVariables then Environment.ExpandEnvironmentVariables s else s
 
       let resolutionFolder = args.[ 2 ] |> processStringParameter
@@ -136,11 +52,11 @@ module TypeProvider =
       let logFile = args.[ 5 ] |> processStringParameter
 
       if not ( String.IsNullOrWhiteSpace logFile ) then
-        IO.enableLogType typeName ( Path.GetFullPath( Path.Combine( finalResolutionFolder , logFile ) ) )
+        enableLogType typeName ( Path.GetFullPath( Path.Combine( finalResolutionFolder , logFile ) ) )
 
-      ctorLog |> Seq.iter ( IO.logType typeName )
+      logfType typeName this.Id "**** CssClassesTypeProvider[%i]: Host process <%s> [%i] requesting type: %s" this.Id proc.ProcessName proc.Id typeName
 
-      IO.logfType typeName "Type: %s" typeName
+      ctorLog |> Seq.iter ( logType typeName this.Id )
 
       let commandParam = args.[ 6 ] |> processStringParameter
       let commandConfig =
@@ -152,32 +68,30 @@ module TypeProvider =
             argumentSuffix = args.[ 8 ] |> processStringParameter
           }
 
-      IO.logfType typeName "Configured resolution folder: %s" finalResolutionFolder
-      IO.logfType typeName "Configured command: %s" commandParam
+      logfType typeName this.Id "Configured resolution folder: %s" finalResolutionFolder
+      logfType typeName this.Id "Configured command: %s" commandParam
 
       let naming = args.[ 1 ] :?> Naming
       let getProperties = args.[ 3 ] :?> bool
       let nameCollisions = args.[ 4 ] :?> NameCollisions
 
       let parseSampleToTypeSpec _ value =
-        using ( IO.logTimeType typeName "ParseAndGenerateMembers" typeName ) <| fun _ ->
+        using ( logTimeType typeName this.Id "ParseAndGenerateMembers" typeName ) <| fun _ ->
 
         let cssType = ProvidedTypeDefinition( asm , ns , typeName , Some ( typeof< obj > ) )
-        IO.logType typeName "Parsing CSS"
+        logType typeName this.Id "Parsing CSS"
         let cssClasses = Utils.parseCss value naming nameCollisions
-        IO.logType typeName "Adding type members"
-        addTypeMembersFromCss getProperties cssClasses cssType
+        logType typeName this.Id "Adding type members"
+        Utils.addTypeMembersFromCss getProperties cssClasses cssType
 
         {
           GeneratedType = cssType
           RepresentationType = cssType
-          CreateFromTextReader = fun _ -> failwith "Not Applicable"
-          CreateFromTextReaderForSampleList = fun _ -> failwith "Not Applicable"
           WasValidInput = Option.isSome cssClasses
         }
 
       let source = args.[ 0 ] |> processStringParameter
-      generateType "CSS" ( Sample source ) parseSampleToTypeSpec commandConfig this config "" finalResolutionFolder "" typeName None
+      generateType source parseSampleToTypeSpec commandConfig this config finalResolutionFolder typeName
 
     let parameters = [
       ProvidedStaticParameter( "source" , typeof< string >, parameterDefaultValue = "" )
@@ -218,3 +132,9 @@ module TypeProvider =
 
 [< TypeProviderAssembly >]
 do ()
+
+#if INTERNALS_VISIBLE
+open System.Runtime.CompilerServices
+[< assembly : InternalsVisibleTo( "TypedCssClasses.Tests" ) >]
+do ()
+#endif

@@ -1,12 +1,12 @@
 //
-// Modified for Zanaptak.TypedCssClasses by zanaptak.
+// Adapted from FSharp.Data for Zanaptak.TypedCssClasses by zanaptak.
 //
 
 // --------------------------------------------------------------------------------------
 // Utilities for working with network, downloading resources with specified headers etc.
 // --------------------------------------------------------------------------------------
 
-namespace Zanaptak.TypedCssClasses.Internal.FSharp.Data
+namespace Zanaptak.TypedCssClasses.Internal.FSharpData.Http
 
 open System
 open System.Globalization

@@ -3,8 +3,10 @@ module internal Zanaptak.TypedCssClasses.Utils
 open System
 open System.Globalization
 open System.Text.RegularExpressions
-open Zanaptak.TypedCssClasses.Internal.FSharp.Data.Runtime
 open System.Collections.Generic
+open System.Runtime.InteropServices
+open Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
+open Zanaptak.TypedCssClasses.Internal.FSharpData.Helpers
 
 type Property = { Name : string ; Value : string }
 
@@ -402,3 +404,88 @@ let parseCss text naming nameCollisions =
   if cssContainsBlock then
     getPropertiesFromCss text naming nameCollisions |> Some
   else None
+
+
+// Hard-coded since we know we are targeting netstandard2.0
+// https://docs.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.osplatform.create?view=netstandard-2.0
+let private validPlatforms = set [ "FREEBSD" ; "LINUX" ; "OSX" ; "WINDOWS" ]
+
+let platformSpecific ( delimiters : string ) ( text : string ) =
+  if String.IsNullOrWhiteSpace delimiters then text
+  else
+    let delimiters = delimiters.Trim()
+    let outerDelimiter = delimiters.[ 0 ]
+    let innerDelimiter = if delimiters.Length = 1 then '=' else delimiters.[ 1 ]
+    let segments = text.Split( outerDelimiter );
+    if Array.length segments = 1 then Array.head segments
+    else
+      let platformValueTuples =
+        segments
+        |> Array.map ( fun segment ->
+            match segment.Split( [| innerDelimiter |] , 2 ) with
+            | [| platform ; value |] ->
+                let platform = platform.Trim().ToUpperInvariant()
+                if Set.contains platform validPlatforms then
+                  platform , value
+                else
+                  "" , segment
+            | _ -> "" , segment
+        )
+
+      // First check for at least one valid platform string.
+      // Else assume accidental syntax match and return original whole string.
+      if Array.exists ( fun ( plat , _ ) -> plat <> "" ) platformValueTuples then
+        platformValueTuples
+        |> Array.tryFind ( fun ( plat , _ ) ->
+            // Find first for current platform
+            plat <> "" && RuntimeInformation.IsOSPlatform ( OSPlatform.Create( plat ) )
+        )
+        |> Option.orElseWith ( fun () ->
+            // Else find first with non specified platform
+            platformValueTuples |> Array.tryFind ( fun ( plat , _ ) -> plat = "" )
+        )
+        |> Option.orElseWith ( fun () ->
+            // Else use first regardless of platform specifier
+            Array.tryHead platformValueTuples
+        )
+        |> Option.map snd
+        |> Option.defaultValue ""
+
+      else
+        text
+
+
+let addTypeMembersFromCss getProperties ( cssClasses : Property [] option ) ( cssType : ProvidedTypeDefinition ) =
+
+  let cssClasses = cssClasses |> Option.defaultValue [||]
+
+  cssClasses
+  |> Array.iter ( fun c ->
+    let propName , propValue = c.Name , c.Value
+    let prop = ProvidedProperty( propName , typeof< string > , isStatic = true , getterCode = ( fun _ -> <@@ propValue @@> ) )
+    prop.AddXmlDoc( escapeHtml propValue )
+    cssType.AddMember prop
+  )
+
+  if getProperties then
+    let rowType = ProvidedTypeDefinition("Property", Some(typeof<string[]>), hideObjectMethods = true)
+    let rowNameProp = ProvidedProperty("Name", typeof<string>, getterCode = fun (Singleton row) -> <@@ (%%row:string[]).[0] @@>)
+    rowNameProp.AddXmlDoc "Generated property name using specified naming strategy."
+    let rowValueProp = ProvidedProperty("Value", typeof<string>, getterCode = fun (Singleton row) -> <@@ (%%row:string[]).[1] @@>)
+    rowValueProp.AddXmlDoc "The underlying CSS class value."
+
+    rowType.AddMember rowNameProp
+    rowType.AddMember rowValueProp
+    cssType.AddMember rowType
+
+    let propsArray = cssClasses |> Array.map ( fun p -> [| p.Name ; p.Value |] )
+    let usedNames = cssClasses |> Array.map ( fun p -> p.Name ) |> Set.ofArray
+    let methodName =
+      Seq.init 99 ( fun i -> "GetProperties" + if i = 0 then "" else "_" + string ( i + 1 ) )
+      |> Seq.find ( fun s -> usedNames |> Set.contains s |> not )
+    let staticMethod =
+      ProvidedMethod(methodName, [], typedefof<seq<_>>.MakeGenericType(rowType), isStatic = true,
+        invokeCode = fun _-> <@@ propsArray @@>)
+
+    cssType.AddMember staticMethod
+

@@ -44,16 +44,7 @@
     <Compile Include="vendor\FSharp.Data\Http.fs" />
     <Compile Include="vendor\FSharp.Data\IO.fs" />
     <Compile Include="vendor\FSharp.Data\Caching.fs" />
-    <Compile Include="vendor\FSharp.Data\TextConversions.fs" />
-    <Compile Include="vendor\FSharp.Data\TextRuntime.fs" />
-    <Compile Include="vendor\FSharp.Data\Pluralizer.fs" />
-    <Compile Include="vendor\FSharp.Data\NameUtils.fs" />
-    <Compile Include="vendor\FSharp.Data\StructuralTypes.fs" />
-    <Compile Include="vendor\FSharp.Data\StructuralInference.fs" />
-    <Compile Include="vendor\FSharp.Data\QuotationBuilder.fs" />
-    <Compile Include="vendor\FSharp.Data\AssemblyResolver.fs" />
     <Compile Include="vendor\FSharp.Data\Helpers.fs" />
-    <Compile Include="vendor\FSharp.Data\ConversionsGenerator.fs" />
   </ItemGroup>
 
   <ItemGroup>
