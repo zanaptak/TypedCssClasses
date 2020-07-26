@@ -75,23 +75,18 @@ module TypeProvider =
       let getProperties = args.[ 3 ] :?> bool
       let nameCollisions = args.[ 4 ] :?> NameCollisions
 
-      let parseSampleToTypeSpec _ value =
-        using ( logTimeType typeName this.Id "ParseAndGenerateMembers" typeName ) <| fun _ ->
-
-        let cssType = ProvidedTypeDefinition( asm , ns , typeName , Some ( typeof< obj > ) )
+      let tryParseText value =
         logType typeName this.Id "Parsing CSS"
-        let cssClasses = Utils.parseCss value naming nameCollisions
-        logType typeName this.Id "Adding type members"
-        Utils.addTypeMembersFromCss getProperties cssClasses cssType
+        Utils.parseCss value naming nameCollisions
 
-        {
-          GeneratedType = cssType
-          RepresentationType = cssType
-          WasValidInput = Option.isSome cssClasses
-        }
+      let createType parseResult =
+        logType typeName this.Id "Creating type"
+        let cssType = ProvidedTypeDefinition( asm , ns , typeName , Some ( typeof< obj > ) )
+        Utils.addTypeMembersFromCss getProperties parseResult cssType
+        cssType
 
       let source = args.[ 0 ] |> processStringParameter
-      generateType source parseSampleToTypeSpec commandConfig this config finalResolutionFolder typeName
+      generateType source commandConfig this config finalResolutionFolder typeName tryParseText createType
 
     let parameters = [
       ProvidedStaticParameter( "source" , typeof< string >, parameterDefaultValue = "" )

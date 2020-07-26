@@ -6,9 +6,8 @@ open System.Text.RegularExpressions
 open System.Collections.Generic
 open System.Runtime.InteropServices
 open Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
+open Zanaptak.TypedCssClasses.Internal.FSharpData.ProvidedTypes
 open Zanaptak.TypedCssClasses.Internal.FSharpData.Helpers
-
-type Property = { Name : string ; Value : string }
 
 /// Converts the string to an array of Int32 code-points (the actual Unicode Code Point number).
 let toCodePoints (source : string) : seq<int> =
@@ -80,7 +79,6 @@ let unescapeHexStr hexStr =
   match Int32.TryParse( hexStr , NumberStyles.HexNumber , CultureInfo.InvariantCulture ) with
   | true , codePoint when isUnicodeScalar codePoint -> Char.ConvertFromUtf32 codePoint
   | _ -> replacementChar
-
 
 // https://github.com/dotnet/fsharp/blob/master/src/fsharp/PrettyNaming.fs
 /// The characters that are allowed to be the first character of an identifier.
@@ -161,9 +159,9 @@ let symbolsToUnderscores s =
 // Insert underscores at word boundaries inferred from case changes
 let wordCaseBoundaries s =
   s
-  |> fun s -> Regex.Replace ( s , @"(\p{Lu})(\p{Ll})" , "_$1$2" ) // upper then lower
-  |> fun s -> Regex.Replace ( s , @"([^_\p{Lu}])([\p{Lu}])" , "$1_$2" ) // upper after non upper
-  |> fun s -> Regex.Replace ( s , @"(\p{Nd})([\p{Lu}\p{Ll}])" , "$1_$2" ) // upper/lower after digit
+  |> fun s -> Regex.Replace ( s , @"(\p{Lu})(\p{Ll})" , "_$1$2" , RegexOptions.None , TimeSpan.FromSeconds 10. ) // upper then lower
+  |> fun s -> Regex.Replace ( s , @"([^_\p{Lu}])([\p{Lu}])" , "$1_$2" , RegexOptions.None , TimeSpan.FromSeconds 10. ) // upper after non upper
+  |> fun s -> Regex.Replace ( s , @"(\p{Nd})([\p{Lu}\p{Ll}])" , "$1_$2" , RegexOptions.None , TimeSpan.FromSeconds 10. ) // upper/lower after digit
 
 let capitalize ( s : string ) = s.[ 0 ].ToString().ToUpperInvariant() + s.[ 1 .. ].ToLowerInvariant()
 
@@ -241,7 +239,7 @@ let rec selectorPreludesFromCss text =
     text
     , selectorsAndBlockCapture
     , RegexOptions.IgnorePatternWhitespace ||| RegexOptions.ExplicitCapture
-    , TimeSpan.FromSeconds 5.
+    , TimeSpan.FromSeconds 10.
   )
   |> Seq.cast
   |> Seq.map ( fun ( m : Match ) -> m.Groups.[ "selectors" ].Value.Trim() , m.Groups.[ "blockcontent" ].Value )
@@ -257,7 +255,7 @@ let classNamesFromSelectorText text =
     text
     , classCapture
     , RegexOptions.IgnorePatternWhitespace ||| RegexOptions.ExplicitCapture
-    , TimeSpan.FromSeconds 5.
+    , TimeSpan.FromSeconds 10.
   )
   |> Seq.cast
   |> Seq.map ( fun ( m : Match ) ->
@@ -273,6 +271,8 @@ let classNamesFromSelectorText text =
             else
               escapeStr
           )
+        , RegexOptions.None
+        , TimeSpan.FromSeconds 10.
       )
     |> replaceNonHtml
   )
@@ -386,9 +386,7 @@ let getPropertiesFromCss text naming nameCollisions =
 let parseCss text naming nameCollisions =
 
   // Remove comments
-  let text =
-    text
-    |> fun t -> Regex.Replace( t , @"\s*/\*([^*]|\*(?!/))*\*/\s*" , "" , RegexOptions.None , TimeSpan.FromSeconds 5. )
+  let text = Regex.Replace( text , @"\s*/\*([^*]|\*(?!/))*\*/\s*" , "" , RegexOptions.None , TimeSpan.FromSeconds 10. )
 
   // Check for existence of one declaration block to indicate valid css.
   // Used when file open fails and we are subsequently checking if file-like string is actually inline CSS.
@@ -398,13 +396,14 @@ let parseCss text naming nameCollisions =
       text
       , selectorsAndBlockCapture
       , RegexOptions.IgnorePatternWhitespace ||| RegexOptions.ExplicitCapture
-      , TimeSpan.FromSeconds 5.
+      , TimeSpan.FromSeconds 10.
     )
 
   if cssContainsBlock then
-    getPropertiesFromCss text naming nameCollisions |> Some
+    getPropertiesFromCss text naming nameCollisions
+    |> Array.sort
+    |> Some
   else None
-
 
 // Hard-coded since we know we are targeting netstandard2.0
 // https://docs.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.osplatform.create?view=netstandard-2.0
@@ -454,17 +453,15 @@ let platformSpecific ( delimiters : string ) ( text : string ) =
       else
         text
 
-
-let addTypeMembersFromCss getProperties ( cssClasses : Property [] option ) ( cssType : ProvidedTypeDefinition ) =
-
-  let cssClasses = cssClasses |> Option.defaultValue [||]
+let addTypeMembersFromCss getProperties ( cssClasses : Property array ) ( cssType : ProvidedTypeDefinition ) =
 
   cssClasses
   |> Array.iter ( fun c ->
     let propName , propValue = c.Name , c.Value
-    let prop = ProvidedProperty( propName , typeof< string > , isStatic = true , getterCode = ( fun _ -> <@@ propValue @@> ) )
-    prop.AddXmlDoc( escapeHtml propValue )
-    cssType.AddMember prop
+    // Use literal field instead of property for better completion list performance in IDEs
+    let field = ProvidedField.Literal( propName , typeof< string > , propValue ) // public static literal
+    field.SetFieldAttributes( field.Attributes ||| Reflection.FieldAttributes.InitOnly ) // prevent assignment
+    cssType.AddMember field
   )
 
   if getProperties then
@@ -488,4 +485,3 @@ let addTypeMembersFromCss getProperties ( cssClasses : Property [] option ) ( cs
         invokeCode = fun _-> <@@ propsArray @@>)
 
     cssType.AddMember staticMethod
-
