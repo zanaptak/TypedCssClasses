@@ -3,6 +3,7 @@ module TypedCssClasses.Tests
 open NUnit.Framework
 open Zanaptak.TypedCssClasses
 open Zanaptak.TypedCssClasses.Utils
+open Zanaptak.TypedCssClasses.Internal.FSharpData.ProvidedTypes
 open System
 open System.Reflection
 open System.IO

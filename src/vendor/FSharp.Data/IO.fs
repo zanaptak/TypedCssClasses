@@ -10,6 +10,7 @@ open System.Collections.Generic
 open System.Collections.Concurrent
 open System.IO
 open System.Text
+open System.Text.RegularExpressions
 open System.Diagnostics
 open System.Threading
 open Zanaptak.TypedCssClasses.Internal.FSharpData.Http
@@ -173,6 +174,9 @@ type internal UriResolutionType =
 
 let internal isWeb (uri:Uri) = uri.IsAbsoluteUri && not uri.IsUnc && uri.Scheme <> "file"
 
+let internal pathFromFileUri ( uri : Uri ) =
+  Regex.Replace( uri.OriginalString , @"^file://" , "" , RegexOptions.None , TimeSpan.FromSeconds 10. )
+
 type internal UriResolver =
 
     { ResolutionType : UriResolutionType
@@ -215,7 +219,7 @@ type internal UriResolver =
           | DesignTime -> x.ResolutionFolder // final resolution folder already set at TP entry point
           | RuntimeInFSI -> x.DefaultResolutionFolder |> orCurrentDirIfEmpty
           | Runtime -> AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/')
-        Uri( Path.GetFullPath( Path.Combine(root, uri.OriginalString) ) , UriKind.Absolute), false
+        Uri( Path.GetFullPath( Path.Combine( root , uri.OriginalString ) ) , UriKind.Absolute ), false
 
 /// Opens a stream to the uri using the uriResolver resolution rules
 /// It the uri is a file, uses shared read, so it works when the file locked by Excel or similar tools,
@@ -241,7 +245,7 @@ let internal asyncRead fullTypeName tpInstance (uriResolver:UriResolver) formatN
         return new StringReader(text) :> TextReader
     }, None
   else
-    let path = uri.OriginalString.Replace(Uri.UriSchemeFile + "://", "")
+    let path = pathFromFileUri uri
     logfType fullTypeName tpInstance "Reading from file: %s" path
     async {
         let file = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)
