@@ -32,7 +32,7 @@ Optionally, run `npm run build` to produce a production deployment version.
 
   In the code, note the `type Css = CssClasses<...>` declaration for the TypedCssClasses type provider and the `Css`-prefixed CSS class properties.
 
-* `css/styles.sass` and `css/_base.sass`
+* `content/styles.sass` and `content/_base.sass`
 
   The source Sass files that are used to generate the CSS.
 
@@ -40,7 +40,7 @@ Optionally, run `npm run build` to produce a production deployment version.
 
   The Node-based script file executed by the TypedCssClasses type provider at design and compile time to preprocess the Sass source file into standard CSS, which is then used to generate the CSS class properties.
 
-  This script is used instead of directly calling a `sass` command in order to additionally communicate any referenced files (`_base.sass` in this case) to the type provider as files to watch for changes.
+  This script is used instead of the Sass CLI in order to additionally communicate any referenced files (`_base.sass` in this case) to the type provider as files to watch for changes.
 
 * `deploy/`
 

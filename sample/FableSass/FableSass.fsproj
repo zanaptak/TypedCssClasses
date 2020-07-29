@@ -3,14 +3,17 @@
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="App.fs" />
+    <Content Include="content\index.html" />
+    <Content Include="content\_base.sass" />
+    <Content Include="content\styles.sass" />
+    <Compile Include="src\App.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Fable.Core" Version="3.1.5" />
     <PackageReference Include="Fable.Elmish.HMR" Version="4.0.1" />
     <PackageReference Include="Fable.Elmish.React" Version="3.0.1" />
-    <PackageReference Include="Feliz" Version="1.6.0" />
-    <PackageReference Include="Zanaptak.TypedCssClasses" Version="0.3.1" />
+    <PackageReference Include="Feliz" Version="1.7.0" />
+    <PackageReference Include="Zanaptak.TypedCssClasses" Version="0.4.0" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Update="FSharp.Core" Version="4.7.2" />

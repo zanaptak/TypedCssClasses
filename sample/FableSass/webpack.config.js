@@ -15,11 +15,11 @@ var MiniCssExtractPlugin = require('mini-css-extract-plugin');
 var CONFIG = {
     // The tags to include the generated JS and CSS will be automatically injected in the HTML template
     // See https://github.com/jantimon/html-webpack-plugin
-    indexHtmlTemplate: './src/index.html',
-    fsharpEntry: './src/FableSass.fsproj',
-    cssEntry: './css/styles.sass',
+    indexHtmlTemplate: './content/index.html',
+    fsharpEntry: './FableSass.fsproj',
+    cssEntry: './content/styles.sass',
     outputDir: './deploy',
-    assetsDir: './public',
+    assetsDir: './content/assets',
     devServerPort: 8080,
     // When using webpack-dev-server, you may need to redirect some calls
     // to a external API server. See https://webpack.js.org/configuration/dev-server/#devserver-proxy
@@ -68,7 +68,7 @@ module.exports = {
     // to prevent browser caching if code changes
     output: {
         path: resolve(CONFIG.outputDir),
-        filename: isProduction ? '[name].[hash].js' : '[name].js'
+        filename: isProduction ? '[name].[contenthash].js' : '[name].js'
     },
     mode: isProduction ? 'production' : 'development',
     devtool: isProduction ? 'source-map' : 'eval-source-map',
@@ -86,7 +86,7 @@ module.exports = {
     //      - HotModuleReplacementPlugin: Enables hot reloading when code changes without refreshing
     plugins: isProduction ?
         commonPlugins.concat([
-            new MiniCssExtractPlugin({ filename: 'style.[hash].css' }),
+            new MiniCssExtractPlugin({ filename: 'style.[contenthash].css' }),
             new CopyWebpackPlugin({ patterns: [{ from: resolve(CONFIG.assetsDir) }] }),
         ])
         : commonPlugins.concat([

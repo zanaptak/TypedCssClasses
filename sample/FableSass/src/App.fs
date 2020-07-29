@@ -32,10 +32,10 @@ let update (msg:Msg) (model:Model) =
 open Zanaptak.TypedCssClasses
 type Css =
   CssClasses<
-    "../css/styles.sass"
+    "content/styles.sass"
     , Naming.PascalCase
     , commandFile = "node"
-    , argumentPrefix = "../sass-process.js"
+    , argumentPrefix = "sass-process.js"
     , logFile = "TypedCssClasses.log"
   >
 
@@ -58,7 +58,12 @@ let view (model:Model) dispatch =
           prop.onClick (fun _ -> dispatch Increment)
           prop.text "+"
         ]
-        Html.text (string model)
+        Html.div [
+          prop.classes [
+            Css.Number
+          ]
+          prop.text model
+        ]
         Html.button [
           prop.onClick (fun _ -> dispatch Decrement)
           prop.text "-"

@@ -34,10 +34,10 @@ open Zanaptak.TypedCssClasses
 // Naming.Verbatim required for PurgeCSS bundle reduction -- https://tailwindcss.com/docs/controlling-file-size
 type tailwind =
   CssClasses<
-    "../css/tailwind-source.css"
+    "content/tailwind-source.css"
     , Naming.Verbatim
     , commandFile = "node"
-    , argumentPrefix = "../tailwind-process.js ../tailwind.config.js"
+    , argumentPrefix = "tailwind-process.js tailwind.config.js"
     , logFile = "TypedCssClasses.log"
   >
 
@@ -67,45 +67,41 @@ let view (model:Model) dispatch =
           tailwind.flex
           tailwind.``flex-col``
           tailwind.``items-center``
-          tailwind.``sm:flex-row-reverse``
-          tailwind.``sm:justify-around``
+          tailwind.``wide:flex-row-reverse``
+          tailwind.``wide:justify-around``
         ]
 
         prop.children [
 
           Html.button [
-            prop.style [
-              style.transitionProperty "background-color"
-              style.transitionDurationMilliseconds 200
-            ]
             prop.classes [
               tailwind.``custom-blue-button``
               tailwind.``w-02/05``
-              tailwind.``sm:w-01/06``
+              tailwind.``wide:w-01/06``
+              tailwind.``transition-colors``
+              tailwind.``duration-200``
             ]
             prop.onClick (fun _ -> dispatch Increment)
             prop.text "+"
           ]
 
-          Html.text [
+          Html.div [
             prop.classes [
               tailwind.``text-3xl``
               tailwind.``text-teal-600``
               tailwind.``text-center``
               tailwind.``w-01/06``
             ]
-            prop.text (string model)
+            prop.text model
           ]
 
           Html.button [
-            prop.style [
-              style.transitionProperty "background-color"
-              style.transitionDurationMilliseconds 200
-            ]
             prop.classes [
               tailwind.``custom-blue-button``
               tailwind.``w-02/05``
-              tailwind.``sm:w-01/06``
+              tailwind.``wide:w-01/06``
+              tailwind.``transition-colors``
+              tailwind.``duration-200``
             ]
             prop.onClick (fun _ -> dispatch Decrement)
             prop.text "-"

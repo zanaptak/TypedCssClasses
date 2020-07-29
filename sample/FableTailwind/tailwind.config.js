@@ -1,4 +1,8 @@
 module.exports = {
+  purge: [
+    './content/**/*.html',
+    './src/**/*.fs',
+  ],
   theme: {
     spacing: {
       px: '1px',
@@ -70,5 +74,8 @@ module.exports = {
       full: '100%',
       screen: '100vw',
     }),
+    screens: {
+      wide: '800px',
+    },    
   },
 }

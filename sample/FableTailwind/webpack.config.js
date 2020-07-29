@@ -15,11 +15,11 @@ var MiniCssExtractPlugin = require('mini-css-extract-plugin');
 var CONFIG = {
     // The tags to include the generated JS and CSS will be automatically injected in the HTML template
     // See https://github.com/jantimon/html-webpack-plugin
-    indexHtmlTemplate: './src/index.html',
-    fsharpEntry: './src/FableTailwind.fsproj',
-    cssEntry: './css/tailwind-source.css',
+    indexHtmlTemplate: './content/index.html',
+    fsharpEntry: './FableTailwind.fsproj',
+    cssEntry: './content/tailwind-source.css',
     outputDir: './deploy',
-    assetsDir: './public',
+    assetsDir: './content/assets',
     devServerPort: 8080,
     // When using webpack-dev-server, you may need to redirect some calls
     // to a external API server. See https://webpack.js.org/configuration/dev-server/#devserver-proxy
@@ -40,8 +40,13 @@ var CONFIG = {
     }
 }
 
-// If we're running the webpack-dev-server, assume we're in development mode
-var isProduction = !process.argv.find(v => v.indexOf('webpack-dev-server') !== -1);
+// Use process.env.NODE_ENV to trigger production mode.
+// Tailwind also uses process.env.NODE_ENV to trigger purging.
+// Note that webpack doesn't set the actual env var regardless of options, so we are using cross-env.
+// Webpack only defines a constant for string replacement of process.env.NODE_ENV in bundled code (but not build-time loaders).
+// https://github.com/webpack/webpack/issues/7074
+// https://stackoverflow.com/questions/55259238/what-is-the-difference-between-webpack-env-production-and-mode-production
+var isProduction = process.env.NODE_ENV === 'production'
 console.log('Bundling for ' + (isProduction ? 'production' : 'development') + '...');
 
 // The HtmlWebpackPlugin allows us to use a template for the index.html page
@@ -68,7 +73,7 @@ module.exports = {
     // to prevent browser caching if code changes
     output: {
         path: resolve(CONFIG.outputDir),
-        filename: isProduction ? '[name].[hash].js' : '[name].js'
+        filename: isProduction ? '[name].[contenthash].js' : '[name].js'
     },
     mode: isProduction ? 'production' : 'development',
     devtool: isProduction ? 'source-map' : 'eval-source-map',
@@ -86,7 +91,7 @@ module.exports = {
     //      - HotModuleReplacementPlugin: Enables hot reloading when code changes without refreshing
     plugins: isProduction ?
         commonPlugins.concat([
-            new MiniCssExtractPlugin({ filename: 'style.[hash].css' }),
+            new MiniCssExtractPlugin({ filename: 'style.[contenthash].css' }),
             new CopyWebpackPlugin({ patterns: [{ from: resolve(CONFIG.assetsDir) }] }),
         ])
         : commonPlugins.concat([
