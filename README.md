@@ -12,7 +12,7 @@ The following examples show how to define a type pointing at a local or remote C
 
 ```fs
 // A "Bootstrap" type pointing at a remote Bootstrap CSS file.
-type Bootstrap = CssClasses<"https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css", Naming.PascalCase>
+type Bootstrap = CssClasses<"https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/css/bootstrap.min.css", Naming.PascalCase>
 
 // All CSS classes become Bootstrap.* properties, with design-time completion. 
 div [ ClassName Bootstrap.Card ] [
@@ -97,11 +97,7 @@ The internal logic of this type provider requires standard CSS syntax to extract
 
 ```
 // Assuming a "sass" command is available in PATH.
-type css =
-  CssClasses<
-    "example.sass"
-    , commandFile="sass"
-  >
+type css = CssClasses<"example.sass", commandFile="sass">
 ```
 
 The command can be an executable file in your PATH, a file path relative to the resolution folder (see [`resolutionFolder`](#resolutionfolder) parameter), or an absolute path. The working directory of the process will be the resolution folder of the type provider. On Windows, the .exe extension can be omitted, but other extensions such as .cmd/.bat must be specified.
@@ -123,12 +119,8 @@ Source and arguments are concatenated as-is (after OS-specific and environment v
 To support development in different environments, you can include operating system-specific alternatives in parameters using comma-separated OS=value pairs after an initially-specified default, in the form of `defaultvalue,OS1=value1,OS2=value2`:
 
 ```
-// Global npm-installed sass on Windows uses "sass.cmd". Use that on Windows, plain "sass" everywhere else.
-type css =
-  CssClasses<
-    "example.sass"
-    , commandFile="sass,Windows=sass.cmd"
-  >
+// Use "sass.cmd" on Windows, "sass" everywhere else.
+type css = CssClasses<"example.sass", commandFile="sass,Windows=sass.cmd">
 ```
 
 Supported values are (case-insensitive): `FREEBSD`, `LINUX`, `OSX`, and `WINDOWS`. (Based on [OSPlatform.Create()](https://docs.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.osplatform.create?view=netstandard-2.0) as of .NET Standard 2.0.)
@@ -174,25 +166,24 @@ type css = CssClasses<"file-in-same-dir.css", resolutionFolder=__SOURCE_DIRECTOR
 
 ### getProperties
 
-If true, the type will include a `GetProperties()` method that returns a sequence of the generated property name/value pairs. You could use this, for example, to produce a simple hard-coded standalone set of bindings by running the following `.fsx` script:
+If true, the type will include a `GetProperties()` method that returns a sequence of the generated property name/value pairs. This can be used, for example, to generate hard-coded CSS class bindings via `.fsx` script:
 
 ```fs
-// NOTE: update this reference to a valid assembly location on your machine
-#r "YOUR_USER_HOME_DIRECTORY/.nuget/packages/zanaptak.typedcssclasses/0.1.0/lib/netstandard2.0/Zanaptak.TypedCssClasses.dll"
+// Before release of F# 5, use preview flag: dotnet fsi --langversion:preview SCRIPT_NAME.fsx
+#r "nuget: Zanaptak.TypedCssClasses"
 open Zanaptak.TypedCssClasses
-type css = CssClasses<"https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css", Naming.CamelCase, getProperties=true>
-css.GetProperties()
-|> Seq.sortBy (fun p -> p.Name)
-|> Seq.iter (fun p -> printfn "let %s = \"%s\"" p.Name p.Value)
+type css = CssClasses<"https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/css/bootstrap.min.css", Naming.PascalCase, getProperties=true>
+printfn "module Bootstrap"
+css.GetProperties() |> Seq.iter (fun p -> printfn "let [<Literal>] %s = \"%s\"" p.Name p.Value)
 ```
 
 Example output:
-```
-let accent1 = "accent-1"
-let accent2 = "accent-2"
-let accent3 = "accent-3"
-let accent4 = "accent-4"
-let activator = "activator"
+```fs
+module Bootstrap
+let [<Literal>] Accordion = "accordion"
+let [<Literal>] Active = "active"
+let [<Literal>] Alert = "alert"
+let [<Literal>] AlertDanger = "alert-danger"
 ...
 ```
 
