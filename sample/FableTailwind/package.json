@@ -5,15 +5,15 @@
     "start": "cross-env NODE_ENV=development webpack-dev-server"
   },
   "dependencies": {
-    "@babel/core": "^7.10.5",
-    "@babel/preset-env": "^7.10.4",
+    "@babel/core": "^7.11.0",
+    "@babel/preset-env": "^7.11.0",
     "babel-loader": "^8.1.0",
     "browserslist": "^4.13.0",
-    "caniuse-lite": "^1.0.30001107",
+    "caniuse-lite": "^1.0.30001109",
     "copy-webpack-plugin": "^6.0.3",
     "core-js": "^3.6.5",
     "cross-env": "^7.0.2",
-    "css-loader": "^4.0.0",
+    "css-loader": "^4.1.1",
     "cssnano": "^4.1.10",
     "fable-compiler": "^2.10.2",
     "fable-loader": "^2.1.9",
@@ -25,7 +25,7 @@
     "react-dom": "^16.13.1",
     "style-loader": "^1.2.1",
     "tailwindcss": "^1.6.0",
-    "webpack": "^4.44.0",
+    "webpack": "^4.44.1",
     "webpack-cli": "^3.3.12",
     "webpack-dev-server": "^3.11.0"
   }
