@@ -36,7 +36,7 @@ type Css =
     , Naming.PascalCase
     , commandFile = "node"
     , argumentPrefix = "sass-process.js"
-    , logFile = "TypedCssClasses.log"
+    //, logFile = "TypedCssClasses.log" // uncomment to enable logging
   >
 
 let view (model:Model) dispatch =

@@ -38,7 +38,7 @@ type tailwind =
     , Naming.Verbatim
     , commandFile = "node"
     , argumentPrefix = "tailwind-process.js tailwind.config.js"
-    , logFile = "TypedCssClasses.log"
+    //, logFile = "TypedCssClasses.log" // uncomment to enable logging
   >
 
 let view (model:Model) dispatch =
