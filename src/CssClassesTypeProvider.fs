@@ -79,14 +79,15 @@ module TypeProvider =
         logType typeName this.Id "Parsing CSS"
         Utils.parseCss value naming nameCollisions
 
-      let createType parseResult =
+      let createType isCssModule source parseResult =
         logType typeName this.Id "Creating type"
         let cssType = ProvidedTypeDefinition( asm , ns , typeName , Some ( typeof< obj > ) )
-        Utils.addTypeMembersFromCss getProperties parseResult cssType
+        Utils.addTypeMembersFromCss isCssModule source getProperties parseResult cssType
         cssType
 
       let source = args.[ 0 ] |> processStringParameter
-      generateType source commandConfig this config finalResolutionFolder typeName tryParseText createType
+      let isCssModule = source.StartsWith(".") && source.EndsWith(".module.css")
+      generateType source commandConfig this config finalResolutionFolder typeName tryParseText (createType isCssModule source)
 
     let parameters = [
       ProvidedStaticParameter( "source" , typeof< string >, parameterDefaultValue = "" )
