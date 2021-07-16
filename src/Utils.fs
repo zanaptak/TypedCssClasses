@@ -5,6 +5,7 @@ open System.Globalization
 open System.Text.RegularExpressions
 open System.Collections.Generic
 open System.Runtime.InteropServices
+open System.Web
 open Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 open Zanaptak.TypedCssClasses.Internal.FSharpData.ProvidedTypes
 open Zanaptak.TypedCssClasses.Internal.FSharpData.Helpers
@@ -460,7 +461,7 @@ let importClassFromCssModule (source: string) (className: string) =
     // import style from "./style.module.css";
     // let myClass = style.["my-class"];
     let selector = Expr.Value("default." + className)
-    let path = Expr.Value(source)
+    let path = Expr.Value(HttpUtility.JavaScriptStringEncode source)
     fun (_args: Expr list) -> <@@ Fable.Core.JsInterop.import<string> %%selector %%path @@>
 
 let addTypeMembersFromCss isCssModule source getProperties ( cssClasses : Property array ) ( cssType : ProvidedTypeDefinition ) =

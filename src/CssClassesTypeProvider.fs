@@ -71,23 +71,23 @@ module TypeProvider =
       logfType typeName this.Id "Configured resolution folder: %s" finalResolutionFolder
       logfType typeName this.Id "Configured command: %s" commandParam
 
+      let source = args.[ 0 ] |> processStringParameter
       let naming = args.[ 1 ] :?> Naming
       let getProperties = args.[ 3 ] :?> bool
       let nameCollisions = args.[ 4 ] :?> NameCollisions
+      let fableCssModule = args.[ 11 ] :?> bool
 
       let tryParseText value =
         logType typeName this.Id "Parsing CSS"
         Utils.parseCss value naming nameCollisions
 
-      let createType isCssModule source parseResult =
+      let createType parseResult =
         logType typeName this.Id "Creating type"
         let cssType = ProvidedTypeDefinition( asm , ns , typeName , Some ( typeof< obj > ) )
-        Utils.addTypeMembersFromCss isCssModule source getProperties parseResult cssType
+        Utils.addTypeMembersFromCss fableCssModule source getProperties parseResult cssType
         cssType
 
-      let source = args.[ 0 ] |> processStringParameter
-      let isCssModule = source.StartsWith(".") && source.EndsWith(".module.css")
-      generateType source commandConfig this config finalResolutionFolder typeName tryParseText (createType isCssModule source)
+      generateType source commandConfig this config finalResolutionFolder typeName tryParseText createType
 
     let parameters = [
       ProvidedStaticParameter( "source" , typeof< string >, parameterDefaultValue = "" )
@@ -101,6 +101,7 @@ module TypeProvider =
       ProvidedStaticParameter( "argumentSuffix" , typeof< string >, parameterDefaultValue = "" )
       ProvidedStaticParameter( "osDelimiters" , typeof< string >, parameterDefaultValue = ",=" )
       ProvidedStaticParameter( "expandVariables" , typeof< bool >, parameterDefaultValue = true )
+      ProvidedStaticParameter( "fableCssModule" , typeof< bool >, parameterDefaultValue = false )
     ]
 
     let helpText = """
@@ -119,6 +120,7 @@ module TypeProvider =
       <param name='osDelimiters'>Characters that separate platform-specific values in the provided parameters.
         Default is ",="</param>
       <param name='expandVariables'>Expand environment variables in the provided parameters.</param>
+      <param name='fableCssModule'>Resolve properties to Fable import expressions instead of raw class names to allow processing as a CSS Module.</param>
     """
 
     do parentType.AddXmlDoc helpText
