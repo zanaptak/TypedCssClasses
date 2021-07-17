@@ -5,9 +5,11 @@ open System.Globalization
 open System.Text.RegularExpressions
 open System.Collections.Generic
 open System.Runtime.InteropServices
+open System.Web
 open Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 open Zanaptak.TypedCssClasses.Internal.FSharpData.ProvidedTypes
 open Zanaptak.TypedCssClasses.Internal.FSharpData.Helpers
+open FSharp.Quotations
 
 /// Converts the string to an array of Int32 code-points (the actual Unicode Code Point number).
 let toCodePoints (source : string) : seq<int> =
@@ -453,15 +455,28 @@ let platformSpecific ( delimiters : string ) ( text : string ) =
       else
         text
 
-let addTypeMembersFromCss getProperties ( cssClasses : Property array ) ( cssType : ProvidedTypeDefinition ) =
+let importClassFromCssModule (source: string) (className: string) =
+    // By separating `default` and the class name with a period,
+    // Fable will automatically generate JS code like this:
+    // import style from "./style.module.css";
+    // let myClass = style.["my-class"];
+    let selector = Expr.Value("default." + className)
+    let path = Expr.Value(HttpUtility.JavaScriptStringEncode source)
+    fun (_args: Expr list) -> <@@ Fable.Core.JsInterop.import<string> %%selector %%path @@>
+
+let addTypeMembersFromCss isCssModule source getProperties ( cssClasses : Property array ) ( cssType : ProvidedTypeDefinition ) =
 
   cssClasses
   |> Array.iter ( fun c ->
     let propName , propValue = c.Name , c.Value
-    // Use literal field instead of property for better completion list performance in IDEs
-    let field = ProvidedField.Literal( propName , typeof< string > , propValue ) // public static literal
-    field.SetFieldAttributes( field.Attributes ||| Reflection.FieldAttributes.InitOnly ) // prevent assignment
-    cssType.AddMember field
+    if isCssModule then
+      let prop = ProvidedProperty(propName, typeof<string>, isStatic = true, getterCode = (importClassFromCssModule source propValue))
+      cssType.AddMember prop
+    else
+      // Use literal field instead of property for better completion list performance in IDEs
+      let field = ProvidedField.Literal( propName , typeof< string > , propValue ) // public static literal
+      field.SetFieldAttributes( field.Attributes ||| Reflection.FieldAttributes.InitOnly ) // prevent assignment
+      cssType.AddMember field
   )
 
   if getProperties then
