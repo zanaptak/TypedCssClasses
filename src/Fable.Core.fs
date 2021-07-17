@@ -3,4 +3,5 @@
 
 module Fable.Core.JsInterop
 
-let import<'T> (selector: string) (path: string): 'T = failwith "js native"
+let import<'T> (selector: string) (path: string): 'T =
+    failwithf "Attempted to use Fable CSS Module import expression in non-Fable context (class:%s, source:%s) [Zanaptak.TypedCssClasses]" selector path
