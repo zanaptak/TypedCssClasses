@@ -237,7 +237,7 @@ let internal asyncRead fullTypeName tpInstance (uriResolver:UriResolver) formatN
             | "CSS" -> [ HttpContentTypes.Css ]
             | _ -> []
             @ [ HttpContentTypes.Any ]
-        let headers = [ HttpRequestHeaders.UserAgent ("F# Data " + formatName + " Type Provider")
+        let headers = [ HttpRequestHeaders.UserAgent "Zanaptak.TypedCssClasses Type Provider"
                         HttpRequestHeaders.Accept (String.concat ", " contentTypes) ]
         // Download the whole web resource at once, otherwise with some servers we won't get the full file
         logfType fullTypeName tpInstance "Reading from web URI: %s" uri.OriginalString

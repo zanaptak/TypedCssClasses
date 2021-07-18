@@ -8,1873 +8,1908 @@
 
 namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
-    #nowarn "1182"
+#nowarn "1182"
 
-    // This file contains a set of helper types and methods for providing types in an implementation
-    // of ITypeProvider.
-    //
-    // This code has been modified and is appropriate for use in conjunction with the F# 4.x releases
+// This file contains a set of helper types and methods for providing types in an implementation
+// of ITypeProvider.
+//
+// This code has been modified and is appropriate for use in conjunction with the F# 4.x releases
 
-    open System
-    open System.Reflection
-    open System.Collections.Generic
-    open System.Diagnostics
+open System
+open System.Reflection
+open System.Collections.Generic
+open System.Diagnostics
 
-    open Microsoft.FSharp.Quotations
-    open Microsoft.FSharp.Quotations.Patterns
-    open Microsoft.FSharp.Core.CompilerServices
+open Microsoft.FSharp.Quotations
+open Microsoft.FSharp.Quotations.Patterns
+open Microsoft.FSharp.Core.CompilerServices
 
-    [<AutoOpen>]
-    module Utils =
-        let K x = (fun () -> x)
-        let isNull x = match x with null -> true | _ -> false
-        let isNil x = match x with [] -> true | _ -> false
-        let isEmpty x = match x with [| |] -> true | _ -> false
+[<AutoOpen>]
+module Utils =
+    let K x = (fun () -> x)
+    let isNull x = match x with null -> true | _ -> false
+    let isNil x = match x with [] -> true | _ -> false
+    let isEmpty x = match x with [| |] -> true | _ -> false
 
-        module Option =
-            let toObj x = match x with None -> null | Some x -> x
-            let ofObj x = match x with null -> None | _ -> Some x
+    module Option =
+        let toObj x = match x with None -> null | Some x -> x
+        let ofObj x = match x with null -> None | _ -> Some x
 
-        [<Struct>]
-        type StructOption<'T> (hasValue: bool, value: 'T) =
-            member __.IsNone = not hasValue
-            member __.HasValue = hasValue
-            member __.Value = value
-            override __.ToString() = if hasValue then match box value with null -> "null" | x -> x.ToString() else "<none>"
+    [<Struct>]
+    type StructOption<'T> (hasValue: bool, value: 'T) =
+        member __.IsNone = not hasValue
+        member __.HasValue = hasValue
+        member __.Value = value
+        override __.ToString() = if hasValue then match box value with null -> "null" | x -> x.ToString() else "<none>"
 
-        type uoption<'T> = StructOption<'T>
+    type uoption<'T> = StructOption<'T>
 
-        let UNone<'T> = uoption<'T>(false, Unchecked.defaultof<'T>)
-        let USome v = uoption<'T>(true, v)
-        let (|UNone|USome|) (x:uoption<'T>) = if x.HasValue then USome x.Value else UNone
+    let UNone<'T> = uoption<'T>(false, Unchecked.defaultof<'T>)
+    let USome v = uoption<'T>(true, v)
+    let (|UNone|USome|) (x:uoption<'T>) = if x.HasValue then USome x.Value else UNone
 
-        module StructOption =
-            let toObj x = match x with UNone -> null | USome x -> x
-            let ofObj x = match x with null -> UNone | x -> USome x
-
-
-        let tryFindMulti k map = match Map.tryFind k map with Some res -> res | None -> [| |]
-
-        let splitNameAt (nm:string) idx =
-            if idx < 0 then failwith "splitNameAt: idx < 0";
-            let last = nm.Length - 1
-            if idx > last then failwith "splitNameAt: idx > last";
-            (nm.Substring(0,idx)),
-            (if idx < last then nm.Substring (idx+1,last - idx) else "")
-
-        let splitILTypeName (nm:string) =
-            match nm.LastIndexOf '.' with
-            | -1 -> UNone, nm
-            | idx -> let a,b = splitNameAt nm idx in USome a, b
-
-        let joinILTypeName (nspace: string uoption) (nm:string) =
-            match nspace with
-            | UNone -> nm
-            | USome ns -> ns + "." + nm
-
-        let lengthsEqAndForall2 (arr1: 'T1[]) (arr2: 'T2[]) f =
-            (arr1.Length = arr2.Length) &&
-            (arr1,arr2) ||> Array.forall2 f
-
-        /// General implementation of .Equals(Type) logic for System.Type over symbol types. You can use this with other types too.
-        let rec eqTypes (ty1: Type) (ty2: Type) =
-            if Object.ReferenceEquals(ty1,ty2) then true
-            elif ty1.IsGenericTypeDefinition then ty2.IsGenericTypeDefinition && ty1.Equals(ty2)
-            elif ty1.IsGenericType then ty2.IsGenericType && not ty2.IsGenericTypeDefinition && eqTypes (ty1.GetGenericTypeDefinition()) (ty2.GetGenericTypeDefinition()) && lengthsEqAndForall2 (ty1.GetGenericArguments()) (ty2.GetGenericArguments()) eqTypes
-            elif ty1.IsArray then ty2.IsArray && ty1.GetArrayRank() = ty2.GetArrayRank() && eqTypes (ty1.GetElementType()) (ty2.GetElementType())
-            elif ty1.IsPointer then ty2.IsPointer && eqTypes (ty1.GetElementType()) (ty2.GetElementType())
-            elif ty1.IsByRef then ty2.IsByRef && eqTypes (ty1.GetElementType()) (ty2.GetElementType())
-            else ty1.Equals(box ty2)
-
-        /// General implementation of .Equals(obj) logic for System.Type over symbol types. You can use this with other types too.
-        let eqTypeObj (this: Type) (other: obj) =
-            match other with
-            | :? Type as otherTy -> eqTypes this otherTy
-            | _ -> false
-
-        /// General implementation of .IsAssignableFrom logic for System.Type, regardless of specific implementation
-        let isAssignableFrom (ty: Type) (otherTy: Type) =
-            eqTypes ty otherTy || (match otherTy.BaseType with null -> false | bt -> ty.IsAssignableFrom(bt))
-
-        /// General implementation of .IsSubclassOf logic for System.Type, regardless of specific implementation, with
-        /// an added hack to make the types usable with the FSharp.Core quotations implementation
-        let isSubclassOf (this: Type) (otherTy: Type) =
-            (this.IsClass && otherTy.IsClass && this.IsAssignableFrom(otherTy) && not (eqTypes this otherTy))
-            // The FSharp.Core implementation of FSharp.Quotations uses
-            //      let isDelegateType (typ:Type) =
-            //          if typ.IsSubclassOf(typeof<Delegate>) then ...
-            // This means even target type definitions must process the case where ``otherTy`` is typeof<Delegate> rather than
-            // the System.Delegate type for the target assemblies.
-            || (match this.BaseType with
-                | null -> false
-                | bt -> bt.FullName = "System.MulticastDelegate" && (let fn = otherTy.FullName in fn = "System.Delegate" || fn = "System.MulticastDelegate" ))
+    module StructOption =
+        let toObj x = match x with UNone -> null | USome x -> x
+        let ofObj x = match x with null -> UNone | x -> USome x
 
 
-        /// General implementation of .GetAttributeFlags logic for System.Type over symbol types
-        let getAttributeFlagsImpl (ty: Type) =
-            if ty.IsGenericType then ty.GetGenericTypeDefinition().Attributes
-            elif ty.IsArray then typeof<int[]>.Attributes
-            elif ty.IsPointer then typeof<int>.MakePointerType().Attributes
-            elif ty.IsByRef then typeof<int>.MakeByRefType().Attributes
-            else Unchecked.defaultof<TypeAttributes>
+    let tryFindMulti k map = match Map.tryFind k map with Some res -> res | None -> [| |]
 
-        let bindAll = BindingFlags.DeclaredOnly ||| BindingFlags.Public ||| BindingFlags.NonPublic ||| BindingFlags.Static ||| BindingFlags.Instance
-        let bindCommon = BindingFlags.DeclaredOnly ||| BindingFlags.Static ||| BindingFlags.Instance ||| BindingFlags.Public
-        let bindSome isStatic = BindingFlags.DeclaredOnly ||| BindingFlags.Public ||| BindingFlags.NonPublic ||| (if isStatic then BindingFlags.Static else BindingFlags.Instance)
-        let inline hasFlag e flag = (e &&& flag) <> enum 0
+    let splitNameAt (nm:string) idx =
+        if idx < 0 then failwith "splitNameAt: idx < 0";
+        let last = nm.Length - 1
+        if idx > last then failwith "splitNameAt: idx > last";
+        (nm.Substring(0, idx)),
+        (if idx < last then nm.Substring (idx+1, last - idx) else "")
 
-        let memberBinds isType (bindingFlags: BindingFlags) isStatic isPublic =
-            (isType || hasFlag bindingFlags (if isStatic then BindingFlags.Static else BindingFlags.Instance)) &&
-            ((hasFlag bindingFlags BindingFlags.Public && isPublic) || (hasFlag bindingFlags BindingFlags.NonPublic && not isPublic))
+    let splitILTypeName (nm:string) =
+        match nm.LastIndexOf '.' with
+        | -1 -> UNone, nm
+        | idx -> let a, b = splitNameAt nm idx in USome a, b
 
-        let rec instType inst (ty:Type) =
-            if isNull ty then null
-            elif ty.IsGenericType then
-                let typeArgs = Array.map (instType inst) (ty.GetGenericArguments())
-                ty.GetGenericTypeDefinition().MakeGenericType(typeArgs)
-            elif ty.HasElementType then
-                let ety = instType inst (ty.GetElementType())
-                if ty.IsArray then
-                    let rank = ty.GetArrayRank()
-                    if rank = 1 then ety.MakeArrayType()
-                    else ety.MakeArrayType(rank)
-                elif ty.IsPointer then ety.MakePointerType()
-                elif ty.IsByRef then ety.MakeByRefType()
-                else ty
-            elif ty.IsGenericParameter then
-                let pos = ty.GenericParameterPosition
-                let (inst1: Type[], inst2: Type[]) = inst
-                if pos < inst1.Length then inst1.[pos]
-                elif pos < inst1.Length + inst2.Length then inst2.[pos - inst1.Length]
-                else ty
+    let joinILTypeName (nspace: string uoption) (nm:string) =
+        match nspace with
+        | UNone -> nm
+        | USome ns -> ns + "." + nm
+
+    let lengthsEqAndForall2 (arr1: 'T1[]) (arr2: 'T2[]) f =
+        (arr1.Length = arr2.Length) &&
+        (arr1, arr2) ||> Array.forall2 f
+
+    /// General implementation of .Equals(Type) logic for System.Type over symbol types. You can use this with other types too.
+    let rec eqTypes (ty1: Type) (ty2: Type) =
+        if Object.ReferenceEquals(ty1, ty2) then true
+        elif ty1.IsGenericTypeDefinition then ty2.IsGenericTypeDefinition && ty1.Equals(ty2)
+        elif ty1.IsGenericType then ty2.IsGenericType && not ty2.IsGenericTypeDefinition && eqTypes (ty1.GetGenericTypeDefinition()) (ty2.GetGenericTypeDefinition()) && lengthsEqAndForall2 (ty1.GetGenericArguments()) (ty2.GetGenericArguments()) eqTypes
+        elif ty1.IsArray then ty2.IsArray && ty1.GetArrayRank() = ty2.GetArrayRank() && eqTypes (ty1.GetElementType()) (ty2.GetElementType())
+        elif ty1.IsPointer then ty2.IsPointer && eqTypes (ty1.GetElementType()) (ty2.GetElementType())
+        elif ty1.IsByRef then ty2.IsByRef && eqTypes (ty1.GetElementType()) (ty2.GetElementType())
+        else ty1.Equals(box ty2)
+
+    /// General implementation of .Equals(obj) logic for System.Type over symbol types. You can use this with other types too.
+    let eqTypeObj (this: Type) (other: obj) =
+        match other with
+        | :? Type as otherTy -> eqTypes this otherTy
+        | _ -> false
+
+    /// General implementation of .IsAssignableFrom logic for System.Type, regardless of specific implementation
+    let isAssignableFrom (ty: Type) (otherTy: Type) =
+        eqTypes ty otherTy || (match otherTy.BaseType with null -> false | bt -> ty.IsAssignableFrom(bt))
+
+    /// General implementation of .IsSubclassOf logic for System.Type, regardless of specific implementation, with
+    /// an added hack to make the types usable with the FSharp.Core quotations implementation
+    let isSubclassOf (this: Type) (otherTy: Type) =
+        (this.IsClass && otherTy.IsClass && this.IsAssignableFrom(otherTy) && not (eqTypes this otherTy))
+        // The FSharp.Core implementation of FSharp.Quotations uses
+        //      let isDelegateType (typ:Type) =
+        //          if typ.IsSubclassOf(typeof<Delegate>) then ...
+        // This means even target type definitions must process the case where ``otherTy`` is typeof<Delegate> rather than
+        // the System.Delegate type for the target assemblies.
+        || (match this.BaseType with
+            | null -> false
+            | bt -> bt.FullName = "System.MulticastDelegate" && (let fn = otherTy.FullName in fn = "System.Delegate" || fn = "System.MulticastDelegate" ))
+
+
+    /// General implementation of .GetAttributeFlags logic for System.Type over symbol types
+    let getAttributeFlagsImpl (ty: Type) =
+        if ty.IsGenericType then ty.GetGenericTypeDefinition().Attributes
+        elif ty.IsArray then typeof<int[]>.Attributes
+        elif ty.IsPointer then typeof<int>.MakePointerType().Attributes
+        elif ty.IsByRef then typeof<int>.MakeByRefType().Attributes
+        else Unchecked.defaultof<TypeAttributes>
+
+    let bindAll = BindingFlags.DeclaredOnly ||| BindingFlags.Public ||| BindingFlags.NonPublic ||| BindingFlags.Static ||| BindingFlags.Instance
+    let bindCommon = BindingFlags.DeclaredOnly ||| BindingFlags.Static ||| BindingFlags.Instance ||| BindingFlags.Public
+    let bindSome isStatic = BindingFlags.DeclaredOnly ||| BindingFlags.Public ||| BindingFlags.NonPublic ||| (if isStatic then BindingFlags.Static else BindingFlags.Instance)
+    let inline hasFlag e flag = (e &&& flag) <> enum 0
+
+    let memberBinds isType (bindingFlags: BindingFlags) isStatic isPublic =
+        (isType || hasFlag bindingFlags (if isStatic then BindingFlags.Static else BindingFlags.Instance)) &&
+        ((hasFlag bindingFlags BindingFlags.Public && isPublic) || (hasFlag bindingFlags BindingFlags.NonPublic && not isPublic))
+
+    [<Interface>]
+    type ITypeBuilder =
+        abstract MakeGenericType: Type * Type[] -> Type
+        abstract MakeArrayType: Type -> Type
+        abstract MakeRankedArrayType: Type*int -> Type
+        abstract MakeByRefType: Type -> Type
+        abstract MakePointerType: Type -> Type
+
+    let defaultTypeBuilder =
+        { new ITypeBuilder with
+            member __.MakeGenericType(typeDef, args) = typeDef.MakeGenericType(args)
+            member __.MakeArrayType(typ) = typ.MakeArrayType()
+            member __.MakeRankedArrayType(typ, rank) = typ.MakeArrayType(rank)
+            member __.MakeByRefType(typ) = typ.MakeByRefType()
+            member __.MakePointerType(typ) = typ.MakePointerType() }
+
+    let rec instType (typeBuilder: ITypeBuilder) inst (ty:Type) =
+        if isNull ty then null
+        elif ty.IsGenericType then
+            let typeArgs = Array.map (instType typeBuilder inst) (ty.GetGenericArguments())
+            typeBuilder.MakeGenericType(ty.GetGenericTypeDefinition(), typeArgs)
+        elif ty.HasElementType then
+            let ety : Type = instType typeBuilder inst (ty.GetElementType())
+            if ty.IsArray then
+                let rank = ty.GetArrayRank()
+                if rank = 1 then typeBuilder.MakeArrayType(ety)
+                else typeBuilder.MakeRankedArrayType(ety,rank)
+            elif ty.IsPointer then typeBuilder.MakePointerType(ety)
+            elif ty.IsByRef then typeBuilder.MakeByRefType(ety)
             else ty
+        elif ty.IsGenericParameter then
+            let pos = ty.GenericParameterPosition
+            let (inst1: Type[], inst2: Type[]) = inst
+            if pos < inst1.Length then inst1.[pos]
+            elif pos < inst1.Length + inst2.Length then inst2.[pos - inst1.Length]
+            else ty
+        else ty
+
+
+    let mutable token = 0
+    let genToken() =  token <- token + 1; token
+    /// Internal code of .NET expects the obj[] returned by GetCustomAttributes to be an Attribute[] even in the case of empty arrays
+    let emptyAttributes = (([| |]: Attribute[]) |> box |> unbox<obj[]>)
+
+    type Attributes<'T when 'T :> Attribute>() =
+        static let empty = ([| |] : 'T []) |> box |> unbox<obj[]>
+        static member Empty() = empty
+
+    type Attributes =
+        static member CreateEmpty (typ : Type) =
+            let gtype = typedefof<Attributes<_>>.MakeGenericType([| typ |])
+            // the Empty member is private due to the presence of the fsi file
+            // but when getting rid of the fsi for diagnostic purpose, it becomes public
+            // this is the reason for having both Public and NonPublic flag bellow
+            let gmethod = gtype.GetMethod("Empty", BindingFlags.Static ||| BindingFlags.Public ||| BindingFlags.NonPublic)
+            gmethod.Invoke(null, [||]) :?> obj array
+
+    let nonNull str x = if isNull x then failwithf "Null in '%s', stacktrace = '%s'" str Environment.StackTrace else x
+    let nonNone str x = match x with None -> failwithf "No value has been specified for '%s', stacktrace = '%s'" str Environment.StackTrace | Some v -> v
+    let patchOption v f = match v with None -> f() | Some _ -> failwithf "Already patched, stacktrace = '%s'" Environment.StackTrace
+
+    let notRequired this opname item =
+        let msg = sprintf "The operation '%s' on item '%s' should not be called on provided type, member or parameter of type '%O'. Stack trace:\n%s" opname item (this.GetType()) Environment.StackTrace
+        Debug.Assert (false, msg)
+        raise (NotSupportedException msg)
+
+
+    let adjustTypeAttributes isNested attrs =
+        let visibilityAttributes =
+            match attrs &&& TypeAttributes.VisibilityMask with
+            | TypeAttributes.Public when isNested -> TypeAttributes.NestedPublic
+            | TypeAttributes.NotPublic when isNested -> TypeAttributes.NestedAssembly
+            | TypeAttributes.NestedPublic when not isNested -> TypeAttributes.Public
+            | TypeAttributes.NestedAssembly
+            | TypeAttributes.NestedPrivate
+            | TypeAttributes.NestedFamORAssem
+            | TypeAttributes.NestedFamily
+            | TypeAttributes.NestedFamANDAssem when not isNested -> TypeAttributes.NotPublic
+            | a -> a
+        (attrs &&& ~~~TypeAttributes.VisibilityMask) ||| visibilityAttributes
+
+
+    type ConstructorInfo with
+        member m.GetDefinition() =
+            let dty = m.DeclaringType
+            if (dty.IsGenericType && not dty.IsGenericTypeDefinition) then
+                // Search through the original type definition looking for the one with a matching metadata token
+                let gdty = dty.GetGenericTypeDefinition()
+                gdty.GetConstructors(bindAll)
+                |> Array.tryFind (fun c -> c.MetadataToken = m.MetadataToken)
+                |> function Some m2 -> m2 | None -> failwithf "couldn't rebind %O::%s back to generic constructor definition via metadata token, stacktrace = '%s'" m.DeclaringType m.Name Environment.StackTrace
+            else
+                m
+
+    type PropertyInfo  with
+        member m.GetDefinition() =
+            let dty = m.DeclaringType
+            if (dty.IsGenericType && not dty.IsGenericTypeDefinition) then
+                // Search through the original type definition looking for the one with a matching metadata token
+                let gdty = dty.GetGenericTypeDefinition()
+                gdty.GetProperties(bindAll)
+                |> Array.tryFind (fun c -> c.MetadataToken = m.MetadataToken)
+                |> function Some m2 -> m2 | None -> failwithf "couldn't rebind %O::%s back to generic property definition via metadata token" m.DeclaringType m.Name
+            else
+                m
+
+        member p.IsStatic = p.CanRead && p.GetGetMethod(true).IsStatic || p.CanWrite && p.GetSetMethod(true).IsStatic
+        member p.IsPublic = p.CanRead && p.GetGetMethod(true).IsPublic || p.CanWrite && p.GetSetMethod(true).IsPublic
+
+    type EventInfo  with
+        member m.GetDefinition() =
+            let dty = m.DeclaringType
+            if (dty.IsGenericType && not dty.IsGenericTypeDefinition) then
+                // Search through the original type definition looking for the one with a matching metadata token
+                let gdty = dty.GetGenericTypeDefinition()
+                gdty.GetEvents(bindAll)
+                |> Array.tryFind (fun c -> c.MetadataToken = m.MetadataToken)
+                |> function Some m2 -> m2 | None -> failwithf "couldn't rebind %O::%s back to generic event definition via metadata token" m.DeclaringType m.Name
+            else
+                m
+
+        member p.IsStatic = p.GetAddMethod().IsStatic || p.GetRemoveMethod().IsStatic
+        member p.IsPublic = p.GetAddMethod().IsPublic || p.GetRemoveMethod().IsPublic
+
+    type FieldInfo  with
+        member m.GetDefinition() =
+            let dty = m.DeclaringType
+            if (dty.IsGenericType && not dty.IsGenericTypeDefinition) then
+                // Search through the original type definition looking for the one with a matching metadata token
+                let gdty = dty.GetGenericTypeDefinition()
+                gdty.GetFields(bindAll)
+                |> Array.tryFind (fun c -> c.MetadataToken = m.MetadataToken)
+                |> function Some m2 -> m2 | None -> failwithf "couldn't rebind %O::%s back to generic event definition via metadata token" m.DeclaringType m.Name
+            else
+                m
+
+    type MethodInfo with
+        member m.GetDefinition() =
+            let dty = m.DeclaringType
+            if (m.IsGenericMethod && not dty.IsGenericType) then m.GetGenericMethodDefinition()
+            elif (m.IsGenericMethod && (not m.IsGenericMethodDefinition || not dty.IsGenericTypeDefinition)) ||
+                    (dty.IsGenericType && not dty.IsGenericTypeDefinition) then
+
+                // Search through ALL the methods on the original type definition looking for the one
+                // with a matching metadata token
+                let gdty = if dty.IsGenericType then dty.GetGenericTypeDefinition() else dty
+                gdty.GetMethods(bindSome m.IsStatic)
+                |> Array.tryFind (fun c -> c.MetadataToken = m.MetadataToken)
+                |> function Some m2 -> m2 | None -> failwithf "couldn't rebind generic instantiation of %O::%s back to generic method definition via metadata token" m.DeclaringType m.Name
+
+            else
+                m
+
+    let canBindConstructor (bindingFlags: BindingFlags) (c: ConstructorInfo) =
+            hasFlag bindingFlags BindingFlags.Public && c.IsPublic || hasFlag bindingFlags BindingFlags.NonPublic && not c.IsPublic
+
+    let canBindMethod (bindingFlags: BindingFlags) (c: MethodInfo) =
+            hasFlag bindingFlags BindingFlags.Public && c.IsPublic || hasFlag bindingFlags BindingFlags.NonPublic && not c.IsPublic
+
+    let canBindProperty (bindingFlags: BindingFlags) (c: PropertyInfo) =
+            hasFlag bindingFlags BindingFlags.Public && c.IsPublic || hasFlag bindingFlags BindingFlags.NonPublic && not c.IsPublic
+
+    let canBindField (bindingFlags: BindingFlags) (c: FieldInfo) =
+            hasFlag bindingFlags BindingFlags.Public && c.IsPublic || hasFlag bindingFlags BindingFlags.NonPublic && not c.IsPublic
+
+    let canBindEvent (bindingFlags: BindingFlags) (c: EventInfo) =
+            hasFlag bindingFlags BindingFlags.Public && c.IsPublic || hasFlag bindingFlags BindingFlags.NonPublic && not c.IsPublic
+
+    let canBindNestedType (bindingFlags: BindingFlags) (c: Type) =
+            hasFlag bindingFlags BindingFlags.Public && c.IsNestedPublic || hasFlag bindingFlags BindingFlags.NonPublic && not c.IsNestedPublic
+
+    // We only want to return source types "typeof<Void>" values as _target_ types in one very specific location due to a limitation in the
+    // F# compiler code for multi-targeting.
+    let ImportProvidedMethodBaseAsILMethodRef_OnStack_HACK() =
+        let rec loop i =
+            if i > 9 then
+                false
+            else
+                let frame = StackFrame(i, true)
+                match frame.GetMethod() with
+                | null -> loop (i+1)
+                | m -> m.Name = "ImportProvidedMethodBaseAsILMethodRef" || loop (i+1)
+        loop 1
+
+//--------------------------------------------------------------------------------
+// UncheckedQuotations
+
+// The FSharp.Core 2.0 - 4.0 (4.0.0.0 - 4.4.0.0) quotations implementation is overly strict in that it doesn't allow
+// generation of quotations for cross-targeted FSharp.Core.  Below we define a series of Unchecked methods
+// implemented via reflection hacks to allow creation of various nodes when using a cross-targets FSharp.Core and
+// mscorlib.dll.
+//
+//   - Most importantly, these cross-targeted quotations can be provided to the F# compiler by a type provider.
+//     They are generally produced via the AssemblyReplacer.fs component through a process of rewriting design-time quotations that
+//     are not cross-targeted.
+//
+//   - However, these quotation values are a bit fragile. Using existing FSharp.Core.Quotations.Patterns
+//     active patterns on these quotation nodes will generally work correctly. But using ExprShape.RebuildShapeCombination
+//     on these new nodes will not succed, nor will operations that build new quotations such as Expr.Call.
+//     Instead, use the replacement provided in this module.
+//
+//   - Likewise, some operations in these quotation values like "expr.Type" may be a bit fragile, possibly returning non cross-targeted types in
+//     the result. However those operations are not used by the F# compiler.
+[<AutoOpen>]
+module UncheckedQuotations =
 
+    let qTy = typeof<Var>.Assembly.GetType("Microsoft.FSharp.Quotations.ExprConstInfo")
+    assert (not (isNull qTy))
+
+    let pTy = typeof<Var>.Assembly.GetType("Microsoft.FSharp.Quotations.PatternsModule")
+    assert (not (isNull pTy))
+
+    // These are handles to the internal functions that create quotation nodes of different sizes. Although internal,
+    // these function names have been stable since F# 2.0.
+    let mkFE0 = pTy.GetMethod("mkFE0", bindAll)
+    assert (not (isNull mkFE0))
+
+    let mkFE1 = pTy.GetMethod("mkFE1", bindAll)
+    assert (not (isNull mkFE1))
+
+    let mkFE2 = pTy.GetMethod("mkFE2", bindAll)
+    assert (mkFE2 |> isNull |> not)
 
-        let mutable token = 0
-        let genToken() =  token <- token + 1; token
-        /// Internal code of .NET expects the obj[] returned by GetCustomAttributes to be an Attribute[] even in the case of empty arrays
-        let emptyAttributes = (([| |]: Attribute[]) |> box |> unbox<obj[]>)
-
-        type Attributes<'T when 'T :> Attribute>() =
-            static let empty = ([| |] : 'T []) |> box |> unbox<obj[]>
-            static member Empty() = empty
-
-        type Attributes =
-            static member CreateEmpty (typ : Type) =
-                let gtype = typedefof<Attributes<_>>.MakeGenericType([| typ |])
-                let gmethod = gtype.GetMethod("Empty", BindingFlags.Static ||| BindingFlags.NonPublic )
-                gmethod.Invoke(null, [||]) :?> obj array
-
-        let nonNull str x = if isNull x then failwithf "Null in '%s', stacktrace = '%s'" str Environment.StackTrace else x
-        let nonNone str x = match x with None -> failwithf "No value has been specified for '%s', stacktrace = '%s'" str Environment.StackTrace | Some v -> v
-        let patchOption v f = match v with None -> f() | Some _ -> failwithf "Already patched, stacktrace = '%s'" Environment.StackTrace
-
-        let notRequired this opname item =
-            let msg = sprintf "The operation '%s' on item '%s' should not be called on provided type, member or parameter of type '%O'. Stack trace:\n%s" opname item (this.GetType()) Environment.StackTrace
-            Debug.Assert (false, msg)
-            raise (NotSupportedException msg)
-
-
-        let adjustTypeAttributes isNested attrs =
-            let visibilityAttributes =
-                match attrs &&& TypeAttributes.VisibilityMask with
-                | TypeAttributes.Public when isNested -> TypeAttributes.NestedPublic
-                | TypeAttributes.NotPublic when isNested -> TypeAttributes.NestedAssembly
-                | TypeAttributes.NestedPublic when not isNested -> TypeAttributes.Public
-                | TypeAttributes.NestedAssembly
-                | TypeAttributes.NestedPrivate
-                | TypeAttributes.NestedFamORAssem
-                | TypeAttributes.NestedFamily
-                | TypeAttributes.NestedFamANDAssem when not isNested -> TypeAttributes.NotPublic
-                | a -> a
-            (attrs &&& ~~~TypeAttributes.VisibilityMask) ||| visibilityAttributes
-
-
-        type ConstructorInfo with
-            member m.GetDefinition() =
-                let dty = m.DeclaringType
-                if (dty.IsGenericType && not dty.IsGenericTypeDefinition) then
-                    // Search through the original type definition looking for the one with a matching metadata token
-                    let gdty = dty.GetGenericTypeDefinition()
-                    gdty.GetConstructors(bindAll)
-                    |> Array.tryFind (fun c -> c.MetadataToken = m.MetadataToken)
-                    |> function Some m2 -> m2 | None -> failwithf "couldn't rebind %O::%s back to generic constructor definition via metadata token, stacktrace = '%s'" m.DeclaringType m.Name Environment.StackTrace
-                else
-                    m
-
-        type PropertyInfo  with
-            member m.GetDefinition() =
-                let dty = m.DeclaringType
-                if (dty.IsGenericType && not dty.IsGenericTypeDefinition) then
-                    // Search through the original type definition looking for the one with a matching metadata token
-                    let gdty = dty.GetGenericTypeDefinition()
-                    gdty.GetProperties(bindAll)
-                    |> Array.tryFind (fun c -> c.MetadataToken = m.MetadataToken)
-                    |> function Some m2 -> m2 | None -> failwithf "couldn't rebind %O::%s back to generic property definition via metadata token" m.DeclaringType m.Name
-                else
-                    m
-
-            member p.IsStatic = p.CanRead && p.GetGetMethod().IsStatic || p.CanWrite && p.GetSetMethod().IsStatic
-            member p.IsPublic = p.CanRead && p.GetGetMethod().IsPublic || p.CanWrite && p.GetSetMethod().IsPublic
-
-        type EventInfo  with
-            member m.GetDefinition() =
-                let dty = m.DeclaringType
-                if (dty.IsGenericType && not dty.IsGenericTypeDefinition) then
-                    // Search through the original type definition looking for the one with a matching metadata token
-                    let gdty = dty.GetGenericTypeDefinition()
-                    gdty.GetEvents(bindAll)
-                    |> Array.tryFind (fun c -> c.MetadataToken = m.MetadataToken)
-                    |> function Some m2 -> m2 | None -> failwithf "couldn't rebind %O::%s back to generic event definition via metadata token" m.DeclaringType m.Name
-                else
-                    m
-
-            member p.IsStatic = p.GetAddMethod().IsStatic || p.GetRemoveMethod().IsStatic
-            member p.IsPublic = p.GetAddMethod().IsPublic || p.GetRemoveMethod().IsPublic
-
-        type FieldInfo  with
-            member m.GetDefinition() =
-                let dty = m.DeclaringType
-                if (dty.IsGenericType && not dty.IsGenericTypeDefinition) then
-                    // Search through the original type definition looking for the one with a matching metadata token
-                    let gdty = dty.GetGenericTypeDefinition()
-                    gdty.GetFields(bindAll)
-                    |> Array.tryFind (fun c -> c.MetadataToken = m.MetadataToken)
-                    |> function Some m2 -> m2 | None -> failwithf "couldn't rebind %O::%s back to generic event definition via metadata token" m.DeclaringType m.Name
-                else
-                    m
-
-        type MethodInfo with
-            member m.GetDefinition() =
-                let dty = m.DeclaringType
-                if (m.IsGenericMethod && not dty.IsGenericType) then m.GetGenericMethodDefinition()
-                elif (m.IsGenericMethod && (not m.IsGenericMethodDefinition || not dty.IsGenericTypeDefinition)) ||
-                     (dty.IsGenericType && not dty.IsGenericTypeDefinition) then
-
-                    // Search through ALL the methods on the original type definition looking for the one
-                    // with a matching metadata token
-                    let gdty = if dty.IsGenericType then dty.GetGenericTypeDefinition() else dty
-                    gdty.GetMethods(bindSome m.IsStatic)
-                    |> Array.tryFind (fun c -> c.MetadataToken = m.MetadataToken)
-                    |> function Some m2 -> m2 | None -> failwithf "couldn't rebind generic instantiation of %O::%s back to generic method definition via metadata token" m.DeclaringType m.Name
-
-                else
-                   m
-
-        let canBindConstructor (bindingFlags: BindingFlags) (c: ConstructorInfo) =
-             hasFlag bindingFlags BindingFlags.Public && c.IsPublic || hasFlag bindingFlags BindingFlags.NonPublic && not c.IsPublic
-
-        let canBindMethod (bindingFlags: BindingFlags) (c: MethodInfo) =
-             hasFlag bindingFlags BindingFlags.Public && c.IsPublic || hasFlag bindingFlags BindingFlags.NonPublic && not c.IsPublic
-
-        let canBindProperty (bindingFlags: BindingFlags) (c: PropertyInfo) =
-             hasFlag bindingFlags BindingFlags.Public && c.IsPublic || hasFlag bindingFlags BindingFlags.NonPublic && not c.IsPublic
-
-        let canBindField (bindingFlags: BindingFlags) (c: FieldInfo) =
-             hasFlag bindingFlags BindingFlags.Public && c.IsPublic || hasFlag bindingFlags BindingFlags.NonPublic && not c.IsPublic
-
-        let canBindEvent (bindingFlags: BindingFlags) (c: EventInfo) =
-             hasFlag bindingFlags BindingFlags.Public && c.IsPublic || hasFlag bindingFlags BindingFlags.NonPublic && not c.IsPublic
-
-        let canBindNestedType (bindingFlags: BindingFlags) (c: Type) =
-             hasFlag bindingFlags BindingFlags.Public && c.IsNestedPublic || hasFlag bindingFlags BindingFlags.NonPublic && not c.IsNestedPublic
-
-        // We only want to return source types "typeof<Void>" values as _target_ types in one very specific location due to a limitation in the
-        // F# compiler code for multi-targeting.
-        let ImportProvidedMethodBaseAsILMethodRef_OnStack_HACK() =
-            let rec loop i =
-                if i > 9 then
-                    false
-                else
-                    let frame = StackFrame(i, true)
-                    match frame.GetMethod() with
-                    | null -> loop (i+1)
-                    | m -> m.Name = "ImportProvidedMethodBaseAsILMethodRef" || loop (i+1)
-            loop 1
+    let mkFE3 = pTy.GetMethod("mkFE3", bindAll)
+    assert (mkFE3 |> isNull |> not)
 
-    //--------------------------------------------------------------------------------
-    // UncheckedQuotations
-
-    // The FSharp.Core 2.0 - 4.0 (4.0.0.0 - 4.4.0.0) quotations implementation is overly strict in that it doesn't allow
-    // generation of quotations for cross-targeted FSharp.Core.  Below we define a series of Unchecked methods
-    // implemented via reflection hacks to allow creation of various nodes when using a cross-targets FSharp.Core and
-    // mscorlib.dll.
-    //
-    //   - Most importantly, these cross-targeted quotations can be provided to the F# compiler by a type provider.
-    //     They are generally produced via the AssemblyReplacer.fs component through a process of rewriting design-time quotations that
-    //     are not cross-targeted.
-    //
-    //   - However, these quotation values are a bit fragile. Using existing FSharp.Core.Quotations.Patterns
-    //     active patterns on these quotation nodes will generally work correctly. But using ExprShape.RebuildShapeCombination
-    //     on these new nodes will not succed, nor will operations that build new quotations such as Expr.Call.
-    //     Instead, use the replacement provided in this module.
-    //
-    //   - Likewise, some operations in these quotation values like "expr.Type" may be a bit fragile, possibly returning non cross-targeted types in
-    //     the result. However those operations are not used by the F# compiler.
-    [<AutoOpen>]
-    module UncheckedQuotations =
-
-        let qTy = typeof<Var>.Assembly.GetType("Microsoft.FSharp.Quotations.ExprConstInfo")
-        assert (not (isNull qTy))
-
-        let pTy = typeof<Var>.Assembly.GetType("Microsoft.FSharp.Quotations.PatternsModule")
-        assert (not (isNull pTy))
-
-        // These are handles to the internal functions that create quotation nodes of different sizes. Although internal,
-        // these function names have been stable since F# 2.0.
-        let mkFE0 = pTy.GetMethod("mkFE0", bindAll)
-        assert (not (isNull mkFE0))
-
-        let mkFE1 = pTy.GetMethod("mkFE1", bindAll)
-        assert (not (isNull mkFE1))
-
-        let mkFE2 = pTy.GetMethod("mkFE2", bindAll)
-        assert (mkFE2 |> isNull |> not)
-
-        let mkFE3 = pTy.GetMethod("mkFE3", bindAll)
-        assert (mkFE3 |> isNull |> not)
-
-        let mkFEN = pTy.GetMethod("mkFEN", bindAll)
-        assert (mkFEN |> isNull |> not)
-
-        // These are handles to the internal tags attached to quotation nodes of different sizes. Although internal,
-        // these function names have been stable since F# 2.0.
-        let newDelegateOp = qTy.GetMethod("NewNewDelegateOp", bindAll)
-        assert (newDelegateOp |> isNull |> not)
-
-        let instanceCallOp = qTy.GetMethod("NewInstanceMethodCallOp", bindAll)
-        assert (instanceCallOp |> isNull |> not)
-
-        let staticCallOp = qTy.GetMethod("NewStaticMethodCallOp", bindAll)
-        assert (staticCallOp |> isNull |> not)
-
-        let newObjectOp = qTy.GetMethod("NewNewObjectOp", bindAll)
-        assert (newObjectOp |> isNull |> not)
-
-        let newArrayOp = qTy.GetMethod("NewNewArrayOp", bindAll)
-        assert (newArrayOp |> isNull |> not)
-
-        let appOp = qTy.GetMethod("get_AppOp", bindAll)
-        assert (appOp |> isNull |> not)
-
-        let instancePropGetOp = qTy.GetMethod("NewInstancePropGetOp", bindAll)
-        assert (instancePropGetOp |> isNull |> not)
-
-        let staticPropGetOp = qTy.GetMethod("NewStaticPropGetOp", bindAll)
-        assert (staticPropGetOp |> isNull |> not)
-
-        let instancePropSetOp = qTy.GetMethod("NewInstancePropSetOp", bindAll)
-        assert (instancePropSetOp |> isNull |> not)
-
-        let staticPropSetOp = qTy.GetMethod("NewStaticPropSetOp", bindAll)
-        assert (staticPropSetOp |> isNull |> not)
-
-        let instanceFieldGetOp = qTy.GetMethod("NewInstanceFieldGetOp", bindAll)
-        assert (instanceFieldGetOp |> isNull |> not)
-
-        let staticFieldGetOp = qTy.GetMethod("NewStaticFieldGetOp", bindAll)
-        assert (staticFieldGetOp |> isNull |> not)
-
-        let instanceFieldSetOp = qTy.GetMethod("NewInstanceFieldSetOp", bindAll)
-        assert (instanceFieldSetOp |> isNull |> not)
-
-        let staticFieldSetOp = qTy.GetMethod("NewStaticFieldSetOp", bindAll)
-        assert (staticFieldSetOp |> isNull |> not)
-
-        let tupleGetOp = qTy.GetMethod("NewTupleGetOp", bindAll)
-        assert (tupleGetOp |> isNull |> not)
-
-        let letOp = qTy.GetMethod("get_LetOp", bindAll)
-        assert (letOp |> isNull |> not)
-
-        let forIntegerRangeLoopOp = qTy.GetMethod("get_ForIntegerRangeLoopOp", bindAll)
-        assert (forIntegerRangeLoopOp |> isNull |> not)
-
-        let whileLoopOp = qTy.GetMethod("get_WhileLoopOp", bindAll)
-        assert (whileLoopOp |> isNull |> not)
-
-        let ifThenElseOp = qTy.GetMethod("get_IfThenElseOp", bindAll)
-        assert (ifThenElseOp |> isNull |> not)
-
-        let newUnionCaseOp = qTy.GetMethod("NewNewUnionCaseOp", bindAll)
-        assert (newUnionCaseOp |> isNull |> not)
-
-        let newRecordOp = qTy.GetMethod("NewNewRecordOp", bindAll)
-        assert (newRecordOp |> isNull |> not)
-
-        type Microsoft.FSharp.Quotations.Expr with
-
-            static member NewDelegateUnchecked (ty: Type, vs: Var list, body: Expr) =
-                let e =  List.foldBack (fun v acc -> Expr.Lambda(v,acc)) vs body
-                let op = newDelegateOp.Invoke(null, [| box ty |])
-                mkFE1.Invoke(null, [| box op; box e |]) :?> Expr
-
-            static member NewObjectUnchecked (cinfo: ConstructorInfo, args: Expr list) =
-                let op = newObjectOp.Invoke(null, [| box cinfo |])
-                mkFEN.Invoke(null, [| box op; box args |]) :?> Expr
-
-            static member NewArrayUnchecked (elementType: Type, elements: Expr list) =
-                let op = newArrayOp.Invoke(null, [| box elementType |])
-                mkFEN.Invoke(null, [| box op; box elements |]) :?> Expr
-
-            static member CallUnchecked (minfo: MethodInfo, args: Expr list) =
-                let op = staticCallOp.Invoke(null, [| box minfo |])
-                mkFEN.Invoke(null, [| box op; box args |]) :?> Expr
-
-            static member CallUnchecked (obj: Expr, minfo: MethodInfo, args: Expr list) =
-                let op = instanceCallOp.Invoke(null, [| box minfo |])
-                mkFEN.Invoke(null, [| box op; box (obj::args) |]) :?> Expr
-
-            static member ApplicationUnchecked (f: Expr, x: Expr) =
-                let op = appOp.Invoke(null, [| |])
-                mkFE2.Invoke(null, [| box op; box f; box x |]) :?> Expr
-
-            static member PropertyGetUnchecked (pinfo: PropertyInfo, args: Expr list) =
-                let op = staticPropGetOp.Invoke(null, [| box pinfo |])
-                mkFEN.Invoke(null, [| box op; box args |]) :?> Expr
-
-            static member PropertyGetUnchecked (obj: Expr, pinfo: PropertyInfo, ?args: Expr list) =
-                let args = defaultArg args []
-                let op = instancePropGetOp.Invoke(null, [| box pinfo |])
-                mkFEN.Invoke(null, [| box op; box (obj::args) |]) :?> Expr
-
-            static member PropertySetUnchecked (pinfo: PropertyInfo, value: Expr, ?args: Expr list) =
-                let args = defaultArg args []
-                let op = staticPropSetOp.Invoke(null, [| box pinfo |])
-                mkFEN.Invoke(null, [| box op; box (args@[value]) |]) :?> Expr
-
-            static member PropertySetUnchecked (obj: Expr, pinfo: PropertyInfo, value: Expr, ?args: Expr list) =
-                let args = defaultArg args []
-                let op = instancePropSetOp.Invoke(null, [| box pinfo |])
-                mkFEN.Invoke(null, [| box op; box (obj::(args@[value])) |]) :?> Expr
-
-            static member FieldGetUnchecked (pinfo: FieldInfo) =
-                let op = staticFieldGetOp.Invoke(null, [| box pinfo |])
-                mkFE0.Invoke(null, [| box op; |]) :?> Expr
-
-            static member FieldGetUnchecked (obj: Expr, pinfo: FieldInfo) =
-                let op = instanceFieldGetOp.Invoke(null, [| box pinfo |])
-                mkFE1.Invoke(null, [| box op; box obj |]) :?> Expr
-
-            static member FieldSetUnchecked (pinfo: FieldInfo, value: Expr) =
-                let op = staticFieldSetOp.Invoke(null, [| box pinfo |])
-                mkFE1.Invoke(null, [| box op; box value |]) :?> Expr
-
-            static member FieldSetUnchecked (obj: Expr, pinfo: FieldInfo, value: Expr) =
-                let op = instanceFieldSetOp.Invoke(null, [| box pinfo |])
-                mkFE2.Invoke(null, [| box op; box obj; box value |]) :?> Expr
-
-            static member TupleGetUnchecked (e: Expr, n:int) =
-                let op = tupleGetOp.Invoke(null, [| box e.Type; box n |])
-                mkFE1.Invoke(null, [| box op; box e |]) :?> Expr
-
-            static member LetUnchecked (v:Var, e: Expr, body:Expr) =
-                let lam = Expr.Lambda(v,body)
-                let op = letOp.Invoke(null, [| |])
-                mkFE2.Invoke(null, [| box op; box e; box lam |]) :?> Expr
-
-            static member ForIntegerRangeLoopUnchecked (loopVariable, startExpr:Expr, endExpr:Expr, body:Expr) =
-                let lam = Expr.Lambda(loopVariable, body)
-                let op = forIntegerRangeLoopOp.Invoke(null, [| |])
-                mkFE3.Invoke(null, [| box op; box startExpr; box endExpr; box lam |] ) :?> Expr
-
-            static member WhileLoopUnchecked (guard:Expr, body:Expr) =
-                let op = whileLoopOp.Invoke(null, [| |])
-                mkFE2.Invoke(null, [| box op; box guard; box body |] ):?> Expr
-
-            static member IfThenElseUnchecked (e:Expr, t:Expr, f:Expr) =
-                let op = ifThenElseOp.Invoke(null, [| |])
-                mkFE3.Invoke(null, [| box op; box e; box t; box f |] ):?> Expr
-
-            static member NewUnionCaseUnchecked (uci:Reflection.UnionCaseInfo, args:Expr list) =
-                let op = newUnionCaseOp.Invoke(null, [| box uci |])
-                mkFEN.Invoke(null, [| box op; box args |]) :?> Expr
-
-            static member NewRecordUnchecked (ty:Type, args:Expr list) =
-                let op = newRecordOp.Invoke(null, [| box ty |])
-                mkFEN.Invoke(null, [| box op; box args |]) :?> Expr
-
-        type Shape = Shape of (Expr list -> Expr)
-
-        let (|ShapeCombinationUnchecked|ShapeVarUnchecked|ShapeLambdaUnchecked|) e =
-            match e with
-            | NewObject (cinfo, args) ->
-                ShapeCombinationUnchecked (Shape (function args -> Expr.NewObjectUnchecked (cinfo, args)), args)
-            | NewArray (ty, args) ->
-                ShapeCombinationUnchecked (Shape (function args -> Expr.NewArrayUnchecked (ty, args)), args)
-            | NewDelegate (t, vars, expr) ->
-                ShapeCombinationUnchecked (Shape (function [expr] -> Expr.NewDelegateUnchecked (t, vars, expr) | _ -> invalidArg "expr" "invalid shape"), [expr])
-            | TupleGet (expr, n) ->
-                ShapeCombinationUnchecked (Shape (function [expr] -> Expr.TupleGetUnchecked (expr, n) | _ -> invalidArg "expr" "invalid shape"), [expr])
-            | Application (f, x) ->
-                ShapeCombinationUnchecked (Shape (function [f; x] -> Expr.ApplicationUnchecked (f, x) | _ -> invalidArg "expr" "invalid shape"), [f; x])
-            | Call (objOpt, minfo, args) ->
-                match objOpt with
-                | None -> ShapeCombinationUnchecked (Shape (function args -> Expr.CallUnchecked (minfo, args)), args)
-                | Some obj -> ShapeCombinationUnchecked (Shape (function (obj::args) -> Expr.CallUnchecked (obj, minfo, args) | _ -> invalidArg "expr" "invalid shape"), obj::args)
-            | PropertyGet (objOpt, pinfo, args) ->
-                match objOpt with
-                | None -> ShapeCombinationUnchecked (Shape (function args -> Expr.PropertyGetUnchecked (pinfo, args)), args)
-                | Some obj -> ShapeCombinationUnchecked (Shape (function (obj::args) -> Expr.PropertyGetUnchecked (obj, pinfo, args) | _ -> invalidArg "expr" "invalid shape"), obj::args)
-            | PropertySet (objOpt, pinfo, args, value) ->
-                match objOpt with
-                | None -> ShapeCombinationUnchecked (Shape (function (value::args) -> Expr.PropertySetUnchecked (pinfo, value, args) | _ -> invalidArg "expr" "invalid shape"), value::args)
-                | Some obj -> ShapeCombinationUnchecked (Shape (function (obj::value::args) -> Expr.PropertySetUnchecked (obj, pinfo, value, args) | _ -> invalidArg "expr" "invalid shape"), obj::value::args)
-            | FieldGet (objOpt, pinfo) ->
-                match objOpt with
-                | None -> ShapeCombinationUnchecked (Shape (function _ -> Expr.FieldGetUnchecked (pinfo)), [])
-                | Some obj -> ShapeCombinationUnchecked (Shape (function [obj] -> Expr.FieldGetUnchecked (obj, pinfo) | _ -> invalidArg "expr" "invalid shape"), [obj])
-            | FieldSet (objOpt, pinfo, value) ->
-                match objOpt with
-                | None -> ShapeCombinationUnchecked (Shape (function [value] -> Expr.FieldSetUnchecked (pinfo, value) | _ -> invalidArg "expr" "invalid shape"), [value])
-                | Some obj -> ShapeCombinationUnchecked (Shape (function [obj;value] -> Expr.FieldSetUnchecked (obj, pinfo, value) | _ -> invalidArg "expr" "invalid shape"), [obj; value])
-            | Let (var, value, body) ->
-                ShapeCombinationUnchecked (Shape (function [value;Lambda(var, body)] -> Expr.LetUnchecked(var, value, body) | _ -> invalidArg "expr" "invalid shape"), [value; Expr.Lambda(var, body)])
-            | ForIntegerRangeLoop (loopVar, first, last, body) ->
-                ShapeCombinationUnchecked (Shape (function [first; last; Lambda(loopVar, body)] -> Expr.ForIntegerRangeLoopUnchecked (loopVar, first, last, body) | _ -> invalidArg "expr" "invalid shape"), [first; last; Expr.Lambda(loopVar, body)])
-            | WhileLoop (cond, body) ->
-                ShapeCombinationUnchecked (Shape (function [cond; body] -> Expr.WhileLoopUnchecked (cond,  body) | _ -> invalidArg "expr" "invalid shape"), [cond; body])
-            | IfThenElse (g, t, e) ->
-                ShapeCombinationUnchecked (Shape (function [g; t; e] -> Expr.IfThenElseUnchecked (g, t, e) | _ -> invalidArg "expr" "invalid shape"), [g; t; e])
-            | TupleGet (expr, i) ->
-                ShapeCombinationUnchecked (Shape (function [expr] -> Expr.TupleGetUnchecked (expr, i) | _ -> invalidArg "expr" "invalid shape"), [expr])
-            | ExprShape.ShapeCombination (comb,args) ->
-                ShapeCombinationUnchecked (Shape (fun args -> ExprShape.RebuildShapeCombination(comb, args)), args)
-            | ExprShape.ShapeVar v -> ShapeVarUnchecked v
-            | ExprShape.ShapeLambda (v, e) -> ShapeLambdaUnchecked (v,e)
-
-        let RebuildShapeCombinationUnchecked (Shape comb,args) = comb args
-
-    //--------------------------------------------------------------------------------
-    // Instantiated symbols
-    //
-
-    /// Represents the type constructor in a provided symbol type.
-    [<NoComparison>]
-    type ProvidedTypeSymbolKind =
-        | SDArray
-        | Array of int
-        | Pointer
-        | ByRef
-        | Generic of Type
-        | FSharpTypeAbbreviation of (Assembly * string * string[])
-
-
-    /// Represents an array or other symbolic type involving a provided type as the argument.
-    /// See the type provider spec for the methods that must be implemented.
-    /// Note that the type provider specification does not require us to implement pointer-equality for provided types.
-    type ProvidedTypeSymbol(kind: ProvidedTypeSymbolKind, typeArgs: Type list) as this =
-        inherit TypeDelegator()
-        let typeArgs = Array.ofList typeArgs
-
-        do this.typeImpl <- this
-
-        /// Substitute types for type variables.
-        override __.FullName =
-            match kind,typeArgs with
-            | ProvidedTypeSymbolKind.SDArray,[| arg |] -> arg.FullName + "[]"
-            | ProvidedTypeSymbolKind.Array _,[| arg |] -> arg.FullName + "[*]"
-            | ProvidedTypeSymbolKind.Pointer,[| arg |] -> arg.FullName + "*"
-            | ProvidedTypeSymbolKind.ByRef,[| arg |] -> arg.FullName + "&"
-            | ProvidedTypeSymbolKind.Generic gty, typeArgs -> gty.FullName + "[" + (typeArgs |> Array.map (fun arg -> arg.ToString()) |> String.concat ",") + "]"
-            | ProvidedTypeSymbolKind.FSharpTypeAbbreviation (_,nsp,path),typeArgs -> String.concat "." (Array.append [| nsp |] path) + (match typeArgs with [| |] -> "" | _ -> typeArgs.ToString())
-            | _ -> failwith "unreachable"
-
-        /// Although not strictly required by the type provider specification, this is required when doing basic operations like FullName on
-        /// .NET symbolic types made from this type, e.g. when building Nullable<SomeProvidedType[]>.FullName
-        override __.DeclaringType =
-            match kind with
-            | ProvidedTypeSymbolKind.SDArray -> null
-            | ProvidedTypeSymbolKind.Array _ -> null
-            | ProvidedTypeSymbolKind.Pointer -> null
-            | ProvidedTypeSymbolKind.ByRef -> null
-            | ProvidedTypeSymbolKind.Generic gty -> gty.DeclaringType
-            | ProvidedTypeSymbolKind.FSharpTypeAbbreviation _ -> null
-
-        override __.Name =
-            match kind,typeArgs with
-            | ProvidedTypeSymbolKind.SDArray,[| arg |] -> arg.Name + "[]"
-            | ProvidedTypeSymbolKind.Array _,[| arg |] -> arg.Name + "[*]"
-            | ProvidedTypeSymbolKind.Pointer,[| arg |] -> arg.Name + "*"
-            | ProvidedTypeSymbolKind.ByRef,[| arg |] -> arg.Name + "&"
-            | ProvidedTypeSymbolKind.Generic gty, _typeArgs -> gty.Name
-            | ProvidedTypeSymbolKind.FSharpTypeAbbreviation (_,_,path),_ -> path.[path.Length-1]
-            | _ -> failwith "unreachable"
-
-        override __.BaseType =
-            match kind with
-            | ProvidedTypeSymbolKind.SDArray -> typeof<Array>
-            | ProvidedTypeSymbolKind.Array _ -> typeof<Array>
-            | ProvidedTypeSymbolKind.Pointer -> typeof<ValueType>
-            | ProvidedTypeSymbolKind.ByRef -> typeof<ValueType>
-            | ProvidedTypeSymbolKind.Generic gty  ->
-                if isNull gty.BaseType then null else
-                instType (typeArgs, [| |]) gty.BaseType
-            | ProvidedTypeSymbolKind.FSharpTypeAbbreviation _ -> typeof<obj>
-
-        override __.GetArrayRank() = (match kind with ProvidedTypeSymbolKind.Array n -> n | ProvidedTypeSymbolKind.SDArray -> 1 | _ -> failwithf "non-array type '%O'" this)
-        override __.IsValueTypeImpl() = (match kind with ProvidedTypeSymbolKind.Generic gtd -> gtd.IsValueType | _ -> false)
-        override __.IsArrayImpl() = (match kind with ProvidedTypeSymbolKind.Array _ | ProvidedTypeSymbolKind.SDArray -> true | _ -> false)
-        override __.IsByRefImpl() = (match kind with ProvidedTypeSymbolKind.ByRef _ -> true | _ -> false)
-        override __.IsPointerImpl() = (match kind with ProvidedTypeSymbolKind.Pointer _ -> true | _ -> false)
-        override __.IsPrimitiveImpl() = false
-        override __.IsGenericType = (match kind with ProvidedTypeSymbolKind.Generic _ -> true | _ -> false)
-        override this.GetGenericArguments() = (match kind with ProvidedTypeSymbolKind.Generic _ -> typeArgs |  _ -> failwithf "non-generic type '%O'" this)
-        override this.GetGenericTypeDefinition() = (match kind with ProvidedTypeSymbolKind.Generic e -> e | _ -> failwithf "non-generic type '%O'" this)
-        override __.IsCOMObjectImpl() = false
-        override __.HasElementTypeImpl() = (match kind with ProvidedTypeSymbolKind.Generic _ -> false | _ -> true)
-        override __.GetElementType() = (match kind,typeArgs with (ProvidedTypeSymbolKind.Array _  | ProvidedTypeSymbolKind.SDArray | ProvidedTypeSymbolKind.ByRef | ProvidedTypeSymbolKind.Pointer),[| e |] -> e | _ -> failwithf "not an array, pointer or byref type")
-
-        override this.Assembly =
-            match kind, typeArgs with
-            | ProvidedTypeSymbolKind.FSharpTypeAbbreviation (assembly,_nsp,_path), _ -> assembly
-            | ProvidedTypeSymbolKind.Generic gty, _ -> gty.Assembly
-            | ProvidedTypeSymbolKind.SDArray,[| arg |] -> arg.Assembly
-            | ProvidedTypeSymbolKind.Array _,[| arg |] -> arg.Assembly
-            | ProvidedTypeSymbolKind.Pointer,[| arg |] -> arg.Assembly
-            | ProvidedTypeSymbolKind.ByRef,[| arg |] -> arg.Assembly
-            | _ -> notRequired this "Assembly" this.FullName
-
-        override this.Namespace =
-            match kind,typeArgs with
-            | ProvidedTypeSymbolKind.SDArray,[| arg |] -> arg.Namespace
-            | ProvidedTypeSymbolKind.Array _,[| arg |] -> arg.Namespace
-            | ProvidedTypeSymbolKind.Pointer,[| arg |] -> arg.Namespace
-            | ProvidedTypeSymbolKind.ByRef,[| arg |] -> arg.Namespace
-            | ProvidedTypeSymbolKind.Generic gty,_ -> gty.Namespace
-            | ProvidedTypeSymbolKind.FSharpTypeAbbreviation (_assembly,nsp,_path),_ -> nsp
-            | _ -> notRequired this "Namespace" this.FullName
-
-        override x.Module = x.Assembly.ManifestModule
-
-        override __.GetHashCode()                                                                    =
-            match kind,typeArgs with
-            | ProvidedTypeSymbolKind.SDArray,[| arg |] -> 10 + hash arg
-            | ProvidedTypeSymbolKind.Array _,[| arg |] -> 163 + hash arg
-            | ProvidedTypeSymbolKind.Pointer,[| arg |] -> 283 + hash arg
-            | ProvidedTypeSymbolKind.ByRef,[| arg |] -> 43904 + hash arg
-            | ProvidedTypeSymbolKind.Generic gty,_ -> 9797 + hash gty + Array.sumBy hash typeArgs
-            | ProvidedTypeSymbolKind.FSharpTypeAbbreviation _,_ -> 3092
-            | _ -> failwith "unreachable"
-
-        override this.Equals(other: obj) = eqTypeObj this other
-
-        override this.Equals(otherTy: Type) = eqTypes this otherTy
-
-        override this.IsAssignableFrom(otherTy: Type) = isAssignableFrom this otherTy
-
-        override this.IsSubclassOf(otherTy: Type) = isSubclassOf this otherTy
-
-        member __.Kind = kind
-
-        member __.Args = typeArgs
-
-        member __.IsFSharpTypeAbbreviation = match kind with FSharpTypeAbbreviation _ -> true | _ -> false
-
-        // For example, int<kg>
-        member __.IsFSharpUnitAnnotated = match kind with ProvidedTypeSymbolKind.Generic gtd -> not gtd.IsGenericTypeDefinition | _ -> false
-
-        override __.GetConstructorImpl(_bindingFlags, _binder, _callConventions, _types, _modifiers) = null
-
-        override this.GetMethodImpl(name, bindingFlags, _binderBinder, _callConvention, _types, _modifiers) =
-            match kind with
-            | Generic gtd ->
-                let ty = gtd.GetGenericTypeDefinition().MakeGenericType(typeArgs)
-                ty.GetMethod(name, bindingFlags)
-            | _ -> notRequired this "GetMethodImpl" this.FullName
-
-
-        override this.GetField(_name, _bindingFlags) = notRequired this "GetField" this.FullName
-
-        override this.GetPropertyImpl(_name, _bindingFlags, _binder, _returnType, _types, _modifiers) = notRequired this "GetPropertyImpl" this.FullName
-
-        override this.GetEvent(_name, _bindingFlags) = notRequired this "GetEvent" this.FullName
-
-        override this.GetNestedType(_name, _bindingFlags) = notRequired this "GetNestedType" this.FullName
-
-        override this.GetConstructors _bindingFlags = notRequired this "GetConstructors" this.FullName
-
-        override this.GetMethods _bindingFlags = notRequired this "GetMethods" this.FullName
-
-        override this.GetFields _bindingFlags = notRequired this "GetFields" this.FullName
-
-        override this.GetProperties _bindingFlags = notRequired this "GetProperties" this.FullName
-
-        override this.GetEvents _bindingFlags = notRequired this "GetEvents" this.FullName
-
-        override this.GetNestedTypes _bindingFlags = notRequired this "GetNestedTypes" this.FullName
-
-        override this.GetMembers _bindingFlags = notRequired this "GetMembers" this.FullName
-
-        override this.GetInterface(_name, _ignoreCase) = notRequired this "GetInterface" this.FullName
-
-        override this.GetInterfaces() = notRequired this "GetInterfaces" this.FullName
-
-        override this.GetAttributeFlagsImpl() = getAttributeFlagsImpl this
-
-        override this.UnderlyingSystemType =
-            match kind with
-            | ProvidedTypeSymbolKind.SDArray
-            | ProvidedTypeSymbolKind.Array _
-            | ProvidedTypeSymbolKind.Pointer
-            | ProvidedTypeSymbolKind.FSharpTypeAbbreviation _
-            | ProvidedTypeSymbolKind.ByRef -> upcast this
-            | ProvidedTypeSymbolKind.Generic gty -> gty.UnderlyingSystemType
-
-        override __.GetCustomAttributesData() =  ([| |] :> IList<_>)
-
-        override this.MemberType = notRequired this "MemberType" this.FullName
-
-        override this.GetMember(_name,_mt,_bindingFlags) = notRequired this "GetMember" this.FullName
-
-        override this.GUID = notRequired this "GUID" this.FullName
-
-        override this.InvokeMember(_name, _invokeAttr, _binder, _target, _args, _modifiers, _culture, _namedParameters) = notRequired this "InvokeMember" this.FullName
-
-        override this.AssemblyQualifiedName = notRequired this "AssemblyQualifiedName" this.FullName
-
-        override __.GetCustomAttributes(_inherit) = emptyAttributes
-
-        override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
-
-        override __.IsDefined(_attributeType, _inherit) = false
-
-        override this.MakeArrayType() = ProvidedTypeSymbol(ProvidedTypeSymbolKind.SDArray, [this]) :> Type
-
-        override this.MakeArrayType arg = ProvidedTypeSymbol(ProvidedTypeSymbolKind.Array arg, [this]) :> Type
+    let mkFEN = pTy.GetMethod("mkFEN", bindAll)
+    assert (mkFEN |> isNull |> not)
+
+    // These are handles to the internal tags attached to quotation nodes of different sizes. Although internal,
+    // these function names have been stable since F# 2.0.
+    let newDelegateOp = qTy.GetMethod("NewNewDelegateOp", bindAll)
+    assert (newDelegateOp |> isNull |> not)
+
+    let instanceCallOp = qTy.GetMethod("NewInstanceMethodCallOp", bindAll)
+    assert (instanceCallOp |> isNull |> not)
+
+    let staticCallOp = qTy.GetMethod("NewStaticMethodCallOp", bindAll)
+    assert (staticCallOp |> isNull |> not)
+
+    let newObjectOp = qTy.GetMethod("NewNewObjectOp", bindAll)
+    assert (newObjectOp |> isNull |> not)
+
+    let newArrayOp = qTy.GetMethod("NewNewArrayOp", bindAll)
+    assert (newArrayOp |> isNull |> not)
+
+    let appOp = qTy.GetMethod("get_AppOp", bindAll)
+    assert (appOp |> isNull |> not)
+
+    let instancePropGetOp = qTy.GetMethod("NewInstancePropGetOp", bindAll)
+    assert (instancePropGetOp |> isNull |> not)
+
+    let staticPropGetOp = qTy.GetMethod("NewStaticPropGetOp", bindAll)
+    assert (staticPropGetOp |> isNull |> not)
+
+    let instancePropSetOp = qTy.GetMethod("NewInstancePropSetOp", bindAll)
+    assert (instancePropSetOp |> isNull |> not)
+
+    let staticPropSetOp = qTy.GetMethod("NewStaticPropSetOp", bindAll)
+    assert (staticPropSetOp |> isNull |> not)
+
+    let instanceFieldGetOp = qTy.GetMethod("NewInstanceFieldGetOp", bindAll)
+    assert (instanceFieldGetOp |> isNull |> not)
+
+    let staticFieldGetOp = qTy.GetMethod("NewStaticFieldGetOp", bindAll)
+    assert (staticFieldGetOp |> isNull |> not)
+
+    let instanceFieldSetOp = qTy.GetMethod("NewInstanceFieldSetOp", bindAll)
+    assert (instanceFieldSetOp |> isNull |> not)
+
+    let staticFieldSetOp = qTy.GetMethod("NewStaticFieldSetOp", bindAll)
+    assert (staticFieldSetOp |> isNull |> not)
+
+    let tupleGetOp = qTy.GetMethod("NewTupleGetOp", bindAll)
+    assert (tupleGetOp |> isNull |> not)
+
+    let letOp = qTy.GetMethod("get_LetOp", bindAll)
+    assert (letOp |> isNull |> not)
+
+    let forIntegerRangeLoopOp = qTy.GetMethod("get_ForIntegerRangeLoopOp", bindAll)
+    assert (forIntegerRangeLoopOp |> isNull |> not)
+
+    let whileLoopOp = qTy.GetMethod("get_WhileLoopOp", bindAll)
+    assert (whileLoopOp |> isNull |> not)
+
+    let ifThenElseOp = qTy.GetMethod("get_IfThenElseOp", bindAll)
+    assert (ifThenElseOp |> isNull |> not)
+
+    let newUnionCaseOp = qTy.GetMethod("NewNewUnionCaseOp", bindAll)
+    assert (newUnionCaseOp |> isNull |> not)
+
+    let newRecordOp = qTy.GetMethod("NewNewRecordOp", bindAll)
+    assert (newRecordOp |> isNull |> not)
+
+    type Microsoft.FSharp.Quotations.Expr with
+
+        static member NewDelegateUnchecked (ty: Type, vs: Var list, body: Expr) =
+            let e =  List.foldBack (fun v acc -> Expr.Lambda(v, acc)) vs body
+            let op = newDelegateOp.Invoke(null, [| box ty |])
+            mkFE1.Invoke(null, [| box op; box e |]) :?> Expr
+
+        static member NewObjectUnchecked (cinfo: ConstructorInfo, args: Expr list) =
+            let op = newObjectOp.Invoke(null, [| box cinfo |])
+            mkFEN.Invoke(null, [| box op; box args |]) :?> Expr
+
+        static member NewArrayUnchecked (elementType: Type, elements: Expr list) =
+            let op = newArrayOp.Invoke(null, [| box elementType |])
+            mkFEN.Invoke(null, [| box op; box elements |]) :?> Expr
+
+        static member CallUnchecked (minfo: MethodInfo, args: Expr list) =
+            let op = staticCallOp.Invoke(null, [| box minfo |])
+            mkFEN.Invoke(null, [| box op; box args |]) :?> Expr
+
+        static member CallUnchecked (obj: Expr, minfo: MethodInfo, args: Expr list) =
+            let op = instanceCallOp.Invoke(null, [| box minfo |])
+            mkFEN.Invoke(null, [| box op; box (obj::args) |]) :?> Expr
+
+        static member ApplicationUnchecked (f: Expr, x: Expr) =
+            let op = appOp.Invoke(null, [| |])
+            mkFE2.Invoke(null, [| box op; box f; box x |]) :?> Expr
+
+        static member PropertyGetUnchecked (pinfo: PropertyInfo, args: Expr list) =
+            let op = staticPropGetOp.Invoke(null, [| box pinfo |])
+            mkFEN.Invoke(null, [| box op; box args |]) :?> Expr
+
+        static member PropertyGetUnchecked (obj: Expr, pinfo: PropertyInfo, ?args: Expr list) =
+            let args = defaultArg args []
+            let op = instancePropGetOp.Invoke(null, [| box pinfo |])
+            mkFEN.Invoke(null, [| box op; box (obj::args) |]) :?> Expr
+
+        static member PropertySetUnchecked (pinfo: PropertyInfo, value: Expr, ?args: Expr list) =
+            let args = defaultArg args []
+            let op = staticPropSetOp.Invoke(null, [| box pinfo |])
+            mkFEN.Invoke(null, [| box op; box (args@[value]) |]) :?> Expr
+
+        static member PropertySetUnchecked (obj: Expr, pinfo: PropertyInfo, value: Expr, ?args: Expr list) =
+            let args = defaultArg args []
+            let op = instancePropSetOp.Invoke(null, [| box pinfo |])
+            mkFEN.Invoke(null, [| box op; box (obj::(args@[value])) |]) :?> Expr
+
+        static member FieldGetUnchecked (pinfo: FieldInfo) =
+            let op = staticFieldGetOp.Invoke(null, [| box pinfo |])
+            mkFE0.Invoke(null, [| box op; |]) :?> Expr
+
+        static member FieldGetUnchecked (obj: Expr, pinfo: FieldInfo) =
+            let op = instanceFieldGetOp.Invoke(null, [| box pinfo |])
+            mkFE1.Invoke(null, [| box op; box obj |]) :?> Expr
+
+        static member FieldSetUnchecked (pinfo: FieldInfo, value: Expr) =
+            let op = staticFieldSetOp.Invoke(null, [| box pinfo |])
+            mkFE1.Invoke(null, [| box op; box value |]) :?> Expr
+
+        static member FieldSetUnchecked (obj: Expr, pinfo: FieldInfo, value: Expr) =
+            let op = instanceFieldSetOp.Invoke(null, [| box pinfo |])
+            mkFE2.Invoke(null, [| box op; box obj; box value |]) :?> Expr
+
+        static member TupleGetUnchecked (e: Expr, n:int) =
+            let op = tupleGetOp.Invoke(null, [| box e.Type; box n |])
+            mkFE1.Invoke(null, [| box op; box e |]) :?> Expr
+
+        static member LetUnchecked (v:Var, e: Expr, body:Expr) =
+            let lam = Expr.Lambda(v, body)
+            let op = letOp.Invoke(null, [| |])
+            mkFE2.Invoke(null, [| box op; box e; box lam |]) :?> Expr
+
+        static member ForIntegerRangeLoopUnchecked (loopVariable, startExpr:Expr, endExpr:Expr, body:Expr) =
+            let lam = Expr.Lambda(loopVariable, body)
+            let op = forIntegerRangeLoopOp.Invoke(null, [| |])
+            mkFE3.Invoke(null, [| box op; box startExpr; box endExpr; box lam |] ) :?> Expr
+
+        static member WhileLoopUnchecked (guard:Expr, body:Expr) =
+            let op = whileLoopOp.Invoke(null, [| |])
+            mkFE2.Invoke(null, [| box op; box guard; box body |] ):?> Expr
+
+        static member IfThenElseUnchecked (e:Expr, t:Expr, f:Expr) =
+            let op = ifThenElseOp.Invoke(null, [| |])
+            mkFE3.Invoke(null, [| box op; box e; box t; box f |] ):?> Expr
+
+        static member NewUnionCaseUnchecked (uci:Reflection.UnionCaseInfo, args:Expr list) =
+            let op = newUnionCaseOp.Invoke(null, [| box uci |])
+            mkFEN.Invoke(null, [| box op; box args |]) :?> Expr
+
+        static member NewRecordUnchecked (ty:Type, args:Expr list) =
+            let op = newRecordOp.Invoke(null, [| box ty |])
+            mkFEN.Invoke(null, [| box op; box args |]) :?> Expr
+
+    type Shape = Shape of (Expr list -> Expr)
+
+    let (|ShapeCombinationUnchecked|ShapeVarUnchecked|ShapeLambdaUnchecked|) e =
+        match e with
+        | NewObject (cinfo, args) ->
+            ShapeCombinationUnchecked (Shape (function args -> Expr.NewObjectUnchecked (cinfo, args)), args)
+        | NewArray (ty, args) ->
+            ShapeCombinationUnchecked (Shape (function args -> Expr.NewArrayUnchecked (ty, args)), args)
+        | NewDelegate (t, vars, expr) ->
+            ShapeCombinationUnchecked (Shape (function [expr] -> Expr.NewDelegateUnchecked (t, vars, expr) | _ -> invalidArg "expr" "invalid shape"), [expr])
+        | TupleGet (expr, n) ->
+            ShapeCombinationUnchecked (Shape (function [expr] -> Expr.TupleGetUnchecked (expr, n) | _ -> invalidArg "expr" "invalid shape"), [expr])
+        | Application (f, x) ->
+            ShapeCombinationUnchecked (Shape (function [f; x] -> Expr.ApplicationUnchecked (f, x) | _ -> invalidArg "expr" "invalid shape"), [f; x])
+        | Call (objOpt, minfo, args) ->
+            match objOpt with
+            | None -> ShapeCombinationUnchecked (Shape (function args -> Expr.CallUnchecked (minfo, args)), args)
+            | Some obj -> ShapeCombinationUnchecked (Shape (function (obj::args) -> Expr.CallUnchecked (obj, minfo, args) | _ -> invalidArg "expr" "invalid shape"), obj::args)
+        | PropertyGet (objOpt, pinfo, args) ->
+            match objOpt with
+            | None -> ShapeCombinationUnchecked (Shape (function args -> Expr.PropertyGetUnchecked (pinfo, args)), args)
+            | Some obj -> ShapeCombinationUnchecked (Shape (function (obj::args) -> Expr.PropertyGetUnchecked (obj, pinfo, args) | _ -> invalidArg "expr" "invalid shape"), obj::args)
+        | PropertySet (objOpt, pinfo, args, value) ->
+            match objOpt with
+            | None -> ShapeCombinationUnchecked (Shape (function (value::args) -> Expr.PropertySetUnchecked (pinfo, value, args) | _ -> invalidArg "expr" "invalid shape"), value::args)
+            | Some obj -> ShapeCombinationUnchecked (Shape (function (obj::value::args) -> Expr.PropertySetUnchecked (obj, pinfo, value, args) | _ -> invalidArg "expr" "invalid shape"), obj::value::args)
+        | FieldGet (objOpt, pinfo) ->
+            match objOpt with
+            | None -> ShapeCombinationUnchecked (Shape (function _ -> Expr.FieldGetUnchecked (pinfo)), [])
+            | Some obj -> ShapeCombinationUnchecked (Shape (function [obj] -> Expr.FieldGetUnchecked (obj, pinfo) | _ -> invalidArg "expr" "invalid shape"), [obj])
+        | FieldSet (objOpt, pinfo, value) ->
+            match objOpt with
+            | None -> ShapeCombinationUnchecked (Shape (function [value] -> Expr.FieldSetUnchecked (pinfo, value) | _ -> invalidArg "expr" "invalid shape"), [value])
+            | Some obj -> ShapeCombinationUnchecked (Shape (function [obj;value] -> Expr.FieldSetUnchecked (obj, pinfo, value) | _ -> invalidArg "expr" "invalid shape"), [obj; value])
+        | Let (var, value, body) ->
+            ShapeCombinationUnchecked (Shape (function [value;Lambda(var, body)] -> Expr.LetUnchecked(var, value, body) | _ -> invalidArg "expr" "invalid shape"), [value; Expr.Lambda(var, body)])
+        | ForIntegerRangeLoop (loopVar, first, last, body) ->
+            ShapeCombinationUnchecked (Shape (function [first; last; Lambda(loopVar, body)] -> Expr.ForIntegerRangeLoopUnchecked (loopVar, first, last, body) | _ -> invalidArg "expr" "invalid shape"), [first; last; Expr.Lambda(loopVar, body)])
+        | WhileLoop (cond, body) ->
+            ShapeCombinationUnchecked (Shape (function [cond; body] -> Expr.WhileLoopUnchecked (cond, body) | _ -> invalidArg "expr" "invalid shape"), [cond; body])
+        | IfThenElse (g, t, e) ->
+            ShapeCombinationUnchecked (Shape (function [g; t; e] -> Expr.IfThenElseUnchecked (g, t, e) | _ -> invalidArg "expr" "invalid shape"), [g; t; e])
+        | TupleGet (expr, i) ->
+            ShapeCombinationUnchecked (Shape (function [expr] -> Expr.TupleGetUnchecked (expr, i) | _ -> invalidArg "expr" "invalid shape"), [expr])
+        | ExprShape.ShapeCombination (comb, args) ->
+            ShapeCombinationUnchecked (Shape (fun args -> ExprShape.RebuildShapeCombination(comb, args)), args)
+        | ExprShape.ShapeVar v -> ShapeVarUnchecked v
+        | ExprShape.ShapeLambda (v, e) -> ShapeLambdaUnchecked (v, e)
+
+    let RebuildShapeCombinationUnchecked (Shape comb, args) = comb args
+
+//--------------------------------------------------------------------------------
+// Instantiated symbols
+//
+
+/// Represents the type constructor in a provided symbol type.
+[<NoComparison>]
+type ProvidedTypeSymbolKind =
+    | SDArray
+    | Array of int
+    | Pointer
+    | ByRef
+    | Generic of Type
+    | FSharpTypeAbbreviation of (Assembly * string * string[])
+
+
+/// Represents an array or other symbolic type involving a provided type as the argument.
+/// See the type provider spec for the methods that must be implemented.
+/// Note that the type provider specification does not require us to implement pointer-equality for provided types.
+type ProvidedTypeSymbol(kind: ProvidedTypeSymbolKind, typeArgs: Type list, typeBuilder: ITypeBuilder) as this =
+    inherit TypeDelegator()
+    let typeArgs = Array.ofList typeArgs
+
+    do this.typeImpl <- this
+
+    /// Substitute types for type variables.
+    override __.FullName =
+        match kind, typeArgs with
+        | ProvidedTypeSymbolKind.SDArray, [| arg |] -> arg.FullName + "[]"
+        | ProvidedTypeSymbolKind.Array _, [| arg |] -> arg.FullName + "[*]"
+        | ProvidedTypeSymbolKind.Pointer, [| arg |] -> arg.FullName + "*"
+        | ProvidedTypeSymbolKind.ByRef, [| arg |] -> arg.FullName + "&"
+        | ProvidedTypeSymbolKind.Generic gty, typeArgs -> gty.FullName + "[" + (typeArgs |> Array.map (fun arg -> arg.ToString()) |> String.concat ",") + "]"
+        | ProvidedTypeSymbolKind.FSharpTypeAbbreviation (_, nsp, path), typeArgs -> String.concat "." (Array.append [| nsp |] path) + (match typeArgs with [| |] -> "" | _ -> typeArgs.ToString())
+        | _ -> failwith "unreachable"
+
+    /// Although not strictly required by the type provider specification, this is required when doing basic operations like FullName on
+    /// .NET symbolic types made from this type, e.g. when building Nullable<SomeProvidedType[]>.FullName
+    override __.DeclaringType =
+        match kind with
+        | ProvidedTypeSymbolKind.SDArray -> null
+        | ProvidedTypeSymbolKind.Array _ -> null
+        | ProvidedTypeSymbolKind.Pointer -> null
+        | ProvidedTypeSymbolKind.ByRef -> null
+        | ProvidedTypeSymbolKind.Generic gty -> gty.DeclaringType
+        | ProvidedTypeSymbolKind.FSharpTypeAbbreviation _ -> null
+
+    override __.Name =
+        match kind, typeArgs with
+        | ProvidedTypeSymbolKind.SDArray, [| arg |] -> arg.Name + "[]"
+        | ProvidedTypeSymbolKind.Array _, [| arg |] -> arg.Name + "[*]"
+        | ProvidedTypeSymbolKind.Pointer, [| arg |] -> arg.Name + "*"
+        | ProvidedTypeSymbolKind.ByRef, [| arg |] -> arg.Name + "&"
+        | ProvidedTypeSymbolKind.Generic gty, _typeArgs -> gty.Name
+        | ProvidedTypeSymbolKind.FSharpTypeAbbreviation (_, _, path), _ -> path.[path.Length-1]
+        | _ -> failwith "unreachable"
+
+    override __.BaseType =
+        match kind with
+        | ProvidedTypeSymbolKind.SDArray -> typeof<Array>
+        | ProvidedTypeSymbolKind.Array _ -> typeof<Array>
+        | ProvidedTypeSymbolKind.Pointer -> typeof<ValueType>
+        | ProvidedTypeSymbolKind.ByRef -> typeof<ValueType>
+        | ProvidedTypeSymbolKind.Generic gty  ->
+            if isNull gty.BaseType then null else
+            instType typeBuilder (typeArgs, [| |]) gty.BaseType
+        | ProvidedTypeSymbolKind.FSharpTypeAbbreviation _ -> typeof<obj>
+
+    override __.GetArrayRank() = (match kind with ProvidedTypeSymbolKind.Array n -> n | ProvidedTypeSymbolKind.SDArray -> 1 | _ -> failwithf "non-array type '%O'" this)
+    override __.IsValueTypeImpl() = (match kind with ProvidedTypeSymbolKind.Generic gtd -> gtd.IsValueType | _ -> false)
+    override __.IsArrayImpl() = (match kind with ProvidedTypeSymbolKind.Array _ | ProvidedTypeSymbolKind.SDArray -> true | _ -> false)
+    override __.IsByRefImpl() = (match kind with ProvidedTypeSymbolKind.ByRef _ -> true | _ -> false)
+    override __.IsPointerImpl() = (match kind with ProvidedTypeSymbolKind.Pointer _ -> true | _ -> false)
+    override __.IsPrimitiveImpl() = false
+    override __.IsGenericType = (match kind with ProvidedTypeSymbolKind.Generic _ -> true | _ -> false)
+    override this.GetGenericArguments() = (match kind with ProvidedTypeSymbolKind.Generic _ -> typeArgs |  _ -> failwithf "non-generic type '%O'" this)
+    override this.GetGenericTypeDefinition() = (match kind with ProvidedTypeSymbolKind.Generic e -> e | _ -> failwithf "non-generic type '%O'" this)
+    override __.IsCOMObjectImpl() = false
+    override __.HasElementTypeImpl() = (match kind with ProvidedTypeSymbolKind.Generic _ -> false | _ -> true)
+    override __.GetElementType() = (match kind, typeArgs with (ProvidedTypeSymbolKind.Array _  | ProvidedTypeSymbolKind.SDArray | ProvidedTypeSymbolKind.ByRef | ProvidedTypeSymbolKind.Pointer), [| e |] -> e | _ -> failwithf "not an array, pointer or byref type")
+
+    override this.Assembly =
+        match kind, typeArgs with
+        | ProvidedTypeSymbolKind.FSharpTypeAbbreviation (assembly, _nsp, _path), _ -> assembly
+        | ProvidedTypeSymbolKind.Generic gty, _ -> gty.Assembly
+        | ProvidedTypeSymbolKind.SDArray, [| arg |] -> arg.Assembly
+        | ProvidedTypeSymbolKind.Array _, [| arg |] -> arg.Assembly
+        | ProvidedTypeSymbolKind.Pointer, [| arg |] -> arg.Assembly
+        | ProvidedTypeSymbolKind.ByRef, [| arg |] -> arg.Assembly
+        | _ -> notRequired this "Assembly" this.FullName
+
+    override this.Namespace =
+        match kind, typeArgs with
+        | ProvidedTypeSymbolKind.SDArray, [| arg |] -> arg.Namespace
+        | ProvidedTypeSymbolKind.Array _, [| arg |] -> arg.Namespace
+        | ProvidedTypeSymbolKind.Pointer, [| arg |] -> arg.Namespace
+        | ProvidedTypeSymbolKind.ByRef, [| arg |] -> arg.Namespace
+        | ProvidedTypeSymbolKind.Generic gty, _ -> gty.Namespace
+        | ProvidedTypeSymbolKind.FSharpTypeAbbreviation (_assembly, nsp, _path), _ -> nsp
+        | _ -> notRequired this "Namespace" this.FullName
+
+    override x.Module = x.Assembly.ManifestModule
+
+    override __.GetHashCode()                                                                    =
+        match kind, typeArgs with
+        | ProvidedTypeSymbolKind.SDArray, [| arg |] -> 10 + hash arg
+        | ProvidedTypeSymbolKind.Array _, [| arg |] -> 163 + hash arg
+        | ProvidedTypeSymbolKind.Pointer, [| arg |] -> 283 + hash arg
+        | ProvidedTypeSymbolKind.ByRef, [| arg |] -> 43904 + hash arg
+        | ProvidedTypeSymbolKind.Generic gty, _ -> 9797 + hash gty + Array.sumBy hash typeArgs
+        | ProvidedTypeSymbolKind.FSharpTypeAbbreviation _, _ -> 3092
+        | _ -> failwith "unreachable"
+
+    override this.Equals(other: obj) = eqTypeObj this other
+
+    override this.Equals(otherTy: Type) = eqTypes this otherTy
+
+    override this.IsAssignableFrom(otherTy: Type) = isAssignableFrom this otherTy
+
+    override this.IsSubclassOf(otherTy: Type) = isSubclassOf this otherTy
+
+    member __.Kind = kind
+
+    member __.Args = typeArgs
+
+    member __.IsFSharpTypeAbbreviation = match kind with FSharpTypeAbbreviation _ -> true | _ -> false
+
+    // For example, int<kg>
+    member __.IsFSharpUnitAnnotated = match kind with ProvidedTypeSymbolKind.Generic gtd -> not gtd.IsGenericTypeDefinition | _ -> false
+
+    override __.GetConstructorImpl(_bindingFlags, _binder, _callConventions, _types, _modifiers) = null
+
+    override this.GetMethodImpl(name, bindingFlags, _binderBinder, _callConvention, _types, _modifiers) =
+        match kind with
+        | Generic gtd ->
+            let ty = gtd.GetGenericTypeDefinition().MakeGenericType(typeArgs)
+            ty.GetMethod(name, bindingFlags)
+        | _ -> notRequired this "GetMethodImpl" this.FullName
+
+
+    override this.GetField(_name, _bindingFlags) = notRequired this "GetField" this.FullName
+
+    override this.GetPropertyImpl(_name, _bindingFlags, _binder, _returnType, _types, _modifiers) = notRequired this "GetPropertyImpl" this.FullName
+
+    override this.GetEvent(_name, _bindingFlags) = notRequired this "GetEvent" this.FullName
+
+    override this.GetNestedType(_name, _bindingFlags) = notRequired this "GetNestedType" this.FullName
+
+    override this.GetConstructors _bindingFlags = notRequired this "GetConstructors" this.FullName
+
+    override this.GetMethods _bindingFlags = notRequired this "GetMethods" this.FullName
+
+    override this.GetFields _bindingFlags = notRequired this "GetFields" this.FullName
+
+    override this.GetProperties _bindingFlags = notRequired this "GetProperties" this.FullName
+
+    override this.GetEvents _bindingFlags = notRequired this "GetEvents" this.FullName
+
+    override this.GetNestedTypes _bindingFlags = notRequired this "GetNestedTypes" this.FullName
+
+    override this.GetMembers _bindingFlags = notRequired this "GetMembers" this.FullName
+
+    override this.GetInterface(_name, _ignoreCase) = notRequired this "GetInterface" this.FullName
+
+    override this.GetInterfaces() = notRequired this "GetInterfaces" this.FullName
+
+    override this.GetAttributeFlagsImpl() = getAttributeFlagsImpl this
+
+    override this.UnderlyingSystemType =
+        match kind with
+        | ProvidedTypeSymbolKind.SDArray
+        | ProvidedTypeSymbolKind.Array _
+        | ProvidedTypeSymbolKind.Pointer
+        | ProvidedTypeSymbolKind.FSharpTypeAbbreviation _
+        | ProvidedTypeSymbolKind.ByRef -> upcast this
+        | ProvidedTypeSymbolKind.Generic gty -> gty.UnderlyingSystemType
+
+    override __.GetCustomAttributesData() =  ([| |] :> IList<_>)
+
+    override this.MemberType = notRequired this "MemberType" this.FullName
+
+    override this.GetMember(_name, _mt, _bindingFlags) = notRequired this "GetMember" this.FullName
+
+    override this.GUID = notRequired this "GUID" this.FullName
+
+    override this.InvokeMember(_name, _invokeAttr, _binder, _target, _args, _modifiers, _culture, _namedParameters) = notRequired this "InvokeMember" this.FullName
+
+    override this.AssemblyQualifiedName = notRequired this "AssemblyQualifiedName" this.FullName
+
+    override __.GetCustomAttributes(_inherit) = emptyAttributes
+
+    override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
+
+    override __.IsDefined(_attributeType, _inherit) = false
+
+    override this.MakeArrayType() = ProvidedTypeSymbol(ProvidedTypeSymbolKind.SDArray, [this], typeBuilder) :> Type
+
+    override this.MakeArrayType arg = ProvidedTypeSymbol(ProvidedTypeSymbolKind.Array arg, [this], typeBuilder) :> Type
 
 #if NETCOREAPP
-        // See bug https://github.com/fsprojects/FSharp.TypeProviders.SDK/issues/236
-        override __.IsSZArray =
-            match kind with
-            | ProvidedTypeSymbolKind.SDArray -> true
-            | _ -> false
+    // See bug https://github.com/fsprojects/FSharp.TypeProviders.SDK/issues/236
+    override __.IsSZArray =
+        match kind with
+        | ProvidedTypeSymbolKind.SDArray -> true
+        | _ -> false
 #endif
 
-        override __.MetadataToken =
-            match kind with
-            | ProvidedTypeSymbolKind.SDArray -> typeof<Array>.MetadataToken
-            | ProvidedTypeSymbolKind.Array _ -> typeof<Array>.MetadataToken
-            | ProvidedTypeSymbolKind.Pointer -> typeof<ValueType>.MetadataToken
-            | ProvidedTypeSymbolKind.ByRef -> typeof<ValueType>.MetadataToken
-            | ProvidedTypeSymbolKind.Generic gty  -> gty.MetadataToken
-            | ProvidedTypeSymbolKind.FSharpTypeAbbreviation _ -> typeof<obj>.MetadataToken
+    override __.MetadataToken =
+        match kind with
+        | ProvidedTypeSymbolKind.SDArray -> typeof<Array>.MetadataToken
+        | ProvidedTypeSymbolKind.Array _ -> typeof<Array>.MetadataToken
+        | ProvidedTypeSymbolKind.Pointer -> typeof<ValueType>.MetadataToken
+        | ProvidedTypeSymbolKind.ByRef -> typeof<ValueType>.MetadataToken
+        | ProvidedTypeSymbolKind.Generic gty  -> gty.MetadataToken
+        | ProvidedTypeSymbolKind.FSharpTypeAbbreviation _ -> typeof<obj>.MetadataToken
 
-        override this.GetEvents() = this.GetEvents(BindingFlags.Public ||| BindingFlags.Instance ||| BindingFlags.Static) // Needed because TypeDelegator.cs provides a delegting implementation of this, and we are self-delegating
+    override this.GetEvents() = this.GetEvents(BindingFlags.Public ||| BindingFlags.Instance ||| BindingFlags.Static) // Needed because TypeDelegator.cs provides a delegting implementation of this, and we are self-delegating
 
-        override this.ToString() = this.FullName
+    override this.ToString() = this.FullName
 
-    type ProvidedSymbolMethod(genericMethodDefinition: MethodInfo, parameters: Type[]) =
-        inherit MethodInfo()
+type ProvidedSymbolMethod(genericMethodDefinition: MethodInfo, parameters: Type[], typeBuilder: ITypeBuilder) =
+    inherit MethodInfo()
 
-        let convParam (p:ParameterInfo) =
-            { new ParameterInfo() with
-                  override __.Name = p.Name
-                  override __.ParameterType = instType (parameters, [| |]) p.ParameterType
-                  override __.Attributes = p.Attributes
-                  override __.RawDefaultValue = p.RawDefaultValue
-                  override __.GetCustomAttributesData() = p.GetCustomAttributesData()
-            }
+    let convParam (p:ParameterInfo) =
+        { new ParameterInfo() with
+                override __.Name = p.Name
+                override __.ParameterType = instType typeBuilder (parameters, [| |]) p.ParameterType
+                override __.Attributes = p.Attributes
+                override __.RawDefaultValue = p.RawDefaultValue
+                override __.GetCustomAttributesData() = p.GetCustomAttributesData()
+        }
 
-        override this.IsGenericMethod =
-            (if this.DeclaringType.IsGenericType then this.DeclaringType.GetGenericArguments().Length else 0) < parameters.Length
+    override this.IsGenericMethod =
+        (if this.DeclaringType.IsGenericType then this.DeclaringType.GetGenericArguments().Length else 0) < parameters.Length
 
-        override this.GetGenericArguments() =
-            Seq.skip (if this.DeclaringType.IsGenericType then this.DeclaringType.GetGenericArguments().Length else 0) parameters |> Seq.toArray
+    override this.GetGenericArguments() =
+        Seq.skip (if this.DeclaringType.IsGenericType then this.DeclaringType.GetGenericArguments().Length else 0) parameters |> Seq.toArray
 
-        override __.GetGenericMethodDefinition() = genericMethodDefinition
+    override __.GetGenericMethodDefinition() = genericMethodDefinition
 
-        override __.DeclaringType = instType (parameters, [| |]) genericMethodDefinition.DeclaringType
-        override __.ToString() = "Method " + genericMethodDefinition.Name
-        override __.Name = genericMethodDefinition.Name
-        override __.MetadataToken = genericMethodDefinition.MetadataToken
-        override __.Attributes = genericMethodDefinition.Attributes
-        override __.CallingConvention = genericMethodDefinition.CallingConvention
-        override __.MemberType = genericMethodDefinition.MemberType
+    override __.DeclaringType = instType typeBuilder (parameters, [| |]) genericMethodDefinition.DeclaringType
+    override __.ToString() = "Method " + genericMethodDefinition.Name
+    override __.Name = genericMethodDefinition.Name
+    override __.MetadataToken = genericMethodDefinition.MetadataToken
+    override __.Attributes = genericMethodDefinition.Attributes
+    override __.CallingConvention = genericMethodDefinition.CallingConvention
+    override __.MemberType = genericMethodDefinition.MemberType
 
-        override this.IsDefined(_attributeType, _inherit): bool = notRequired this "IsDefined" genericMethodDefinition.Name
-        override __.ReturnType = instType (parameters, [| |]) genericMethodDefinition.ReturnType
-        override __.GetParameters() = genericMethodDefinition.GetParameters() |> Array.map convParam
-        override __.ReturnParameter = genericMethodDefinition.ReturnParameter |> convParam
-        override this.ReturnTypeCustomAttributes = notRequired this "ReturnTypeCustomAttributes" genericMethodDefinition.Name
-        override this.GetBaseDefinition() = notRequired this "GetBaseDefinition" genericMethodDefinition.Name
-        override this.GetMethodImplementationFlags() = notRequired this "GetMethodImplementationFlags" genericMethodDefinition.Name
-        override this.MethodHandle = notRequired this "MethodHandle" genericMethodDefinition.Name
-        override this.Invoke(_obj, _invokeAttr, _binder, _parameters, _culture) = notRequired this "Invoke" genericMethodDefinition.Name
-        override this.ReflectedType = notRequired this "ReflectedType" genericMethodDefinition.Name
-        override __.GetCustomAttributes(_inherit) = emptyAttributes
-        override __.GetCustomAttributes(attributeType, _inherit) =  Attributes.CreateEmpty attributeType
+    override this.IsDefined(_attributeType, _inherit): bool = notRequired this "IsDefined" genericMethodDefinition.Name
+    override __.ReturnType = instType typeBuilder (parameters, [| |]) genericMethodDefinition.ReturnType
+    override __.GetParameters() = genericMethodDefinition.GetParameters() |> Array.map convParam
+    override __.ReturnParameter = genericMethodDefinition.ReturnParameter |> convParam
+    override this.ReturnTypeCustomAttributes = notRequired this "ReturnTypeCustomAttributes" genericMethodDefinition.Name
+    override this.GetBaseDefinition() = notRequired this "GetBaseDefinition" genericMethodDefinition.Name
+    override this.GetMethodImplementationFlags() = notRequired this "GetMethodImplementationFlags" genericMethodDefinition.Name
+    override this.MethodHandle = notRequired this "MethodHandle" genericMethodDefinition.Name
+    override this.Invoke(_obj, _invokeAttr, _binder, _parameters, _culture) = notRequired this "Invoke" genericMethodDefinition.Name
+    override this.ReflectedType = notRequired this "ReflectedType" genericMethodDefinition.Name
+    override __.GetCustomAttributes(_inherit) = emptyAttributes
+    override __.GetCustomAttributes(attributeType, _inherit) =  Attributes.CreateEmpty attributeType
 
-    //--------------------------------------------------------------------------------
-    // ProvidedMethod, ProvidedConstructor, ProvidedTypeDefinition and other provided objects
-
-
-    [<AutoOpen>]
-    module Misc =
+//--------------------------------------------------------------------------------
+// ProvidedMethod, ProvidedConstructor, ProvidedTypeDefinition and other provided objects
 
 
-        let mkParamArrayCustomAttributeData() =
-            { new CustomAttributeData() with
-                member __.Constructor =  typeof<ParamArrayAttribute>.GetConstructors().[0]
+[<AutoOpen>]
+module Misc =
+
+
+    let mkParamArrayCustomAttributeData() =
+        { new CustomAttributeData() with
+            member __.Constructor =  typeof<ParamArrayAttribute>.GetConstructors().[0]
+            member __.ConstructorArguments = upcast [| |]
+            member __.NamedArguments = upcast [| |] }
+
+    let mkEditorHideMethodsCustomAttributeData() =
+        { new CustomAttributeData() with
+            member __.Constructor =  typeof<TypeProviderEditorHideMethodsAttribute>.GetConstructors().[0]
+            member __.ConstructorArguments = upcast [| |]
+            member __.NamedArguments = upcast [| |] }
+
+    let mkAllowNullLiteralCustomAttributeData value =
+        { new CustomAttributeData() with
+            member __.Constructor = typeof<AllowNullLiteralAttribute>.GetConstructors().[0]
+            member __.ConstructorArguments = upcast [| CustomAttributeTypedArgument(typeof<bool>, value) |]
+            member __.NamedArguments = upcast [| |] }
+
+    /// This makes an xml doc attribute w.r.t. an amortized computation of an xml doc string.
+    /// It is important that the text of the xml doc only get forced when poking on the ConstructorArguments
+    /// for the CustomAttributeData object.
+    let mkXmlDocCustomAttributeDataLazy(lazyText: Lazy<string>) =
+        { new CustomAttributeData() with
+            member __.Constructor =  typeof<TypeProviderXmlDocAttribute>.GetConstructors().[0]
+            member __.ConstructorArguments = upcast [| CustomAttributeTypedArgument(typeof<string>, lazyText.Force())  |]
+            member __.NamedArguments = upcast [| |] }
+
+    let mkXmlDocCustomAttributeData(s:string) =  mkXmlDocCustomAttributeDataLazy (lazy s)
+
+    let mkDefinitionLocationAttributeCustomAttributeData(line:int, column:int, filePath:string) =
+        { new CustomAttributeData() with
+            member __.Constructor =  typeof<TypeProviderDefinitionLocationAttribute>.GetConstructors().[0]
+            member __.ConstructorArguments = upcast [| |]
+            member __.NamedArguments =
+                upcast [| CustomAttributeNamedArgument(typeof<TypeProviderDefinitionLocationAttribute>.GetProperty("FilePath"), CustomAttributeTypedArgument(typeof<string>, filePath));
+                            CustomAttributeNamedArgument(typeof<TypeProviderDefinitionLocationAttribute>.GetProperty("Line"), CustomAttributeTypedArgument(typeof<int>, line)) ;
+                            CustomAttributeNamedArgument(typeof<TypeProviderDefinitionLocationAttribute>.GetProperty("Column"), CustomAttributeTypedArgument(typeof<int>, column))
+                        |] }
+    let mkObsoleteAttributeCustomAttributeData(message:string, isError: bool) =
+        { new CustomAttributeData() with
+                member __.Constructor =  typeof<ObsoleteAttribute>.GetConstructors() |> Array.find (fun x -> x.GetParameters().Length = 2)
+                member __.ConstructorArguments = upcast [|CustomAttributeTypedArgument(typeof<string>, message) ; CustomAttributeTypedArgument(typeof<bool>, isError)  |]
+                member __.NamedArguments = upcast [| |] }
+
+    let mkReflectedDefinitionCustomAttributeData() =
+        { new CustomAttributeData() with
+                member __.Constructor =  typeof<ReflectedDefinitionAttribute>.GetConstructors().[0]
                 member __.ConstructorArguments = upcast [| |]
                 member __.NamedArguments = upcast [| |] }
 
-        let mkEditorHideMethodsCustomAttributeData() =
-            { new CustomAttributeData() with
-                member __.Constructor =  typeof<TypeProviderEditorHideMethodsAttribute>.GetConstructors().[0]
-                member __.ConstructorArguments = upcast [| |]
-                member __.NamedArguments = upcast [| |] }
+    type CustomAttributesImpl(isTgt, customAttributesData) =
+        let customAttributes = ResizeArray<CustomAttributeData>()
+        let mutable hideObjectMethods = false
+        let mutable nonNullable = false
+        let mutable obsoleteMessage = None
+        let mutable xmlDocDelayed = None
+        let mutable xmlDocAlwaysRecomputed = None
+        let mutable hasParamArray = false
+        let mutable hasReflectedDefinition = false
 
-        let mkAllowNullLiteralCustomAttributeData value =
-            { new CustomAttributeData() with
-                member __.Constructor = typeof<AllowNullLiteralAttribute>.GetConstructors().[0]
-                member __.ConstructorArguments = upcast [| CustomAttributeTypedArgument(typeof<bool>, value) |]
-                member __.NamedArguments = upcast [| |] }
+        // XML doc text that we only compute once, if any. This must _not_ be forced until the ConstructorArguments
+        // property of the custom attribute is foced.
+        let xmlDocDelayedText =
+            lazy
+                (match xmlDocDelayed with None -> assert false; "" | Some f -> f())
 
-        /// This makes an xml doc attribute w.r.t. an amortized computation of an xml doc string.
-        /// It is important that the text of the xml doc only get forced when poking on the ConstructorArguments
-        /// for the CustomAttributeData object.
-        let mkXmlDocCustomAttributeDataLazy(lazyText: Lazy<string>) =
-            { new CustomAttributeData() with
-                member __.Constructor =  typeof<TypeProviderXmlDocAttribute>.GetConstructors().[0]
-                member __.ConstructorArguments = upcast [| CustomAttributeTypedArgument(typeof<string>, lazyText.Force())  |]
-                member __.NamedArguments = upcast [| |] }
+        // Custom atttributes that we only compute once
+        let customAttributesOnce =
+            lazy
+                [|
+                    if not isTgt then
+                        if hideObjectMethods then yield mkEditorHideMethodsCustomAttributeData()
+                        if nonNullable then yield mkAllowNullLiteralCustomAttributeData false
+                        match xmlDocDelayed with None -> () | Some _ -> customAttributes.Add(mkXmlDocCustomAttributeDataLazy xmlDocDelayedText)
+                        match xmlDocAlwaysRecomputed with None -> () | Some f -> yield mkXmlDocCustomAttributeData (f())
+                        match obsoleteMessage with None -> () | Some s -> customAttributes.Add(mkObsoleteAttributeCustomAttributeData s)
+                        if hasParamArray then yield mkParamArrayCustomAttributeData()
+                        if hasReflectedDefinition then yield mkReflectedDefinitionCustomAttributeData()
+                        yield! customAttributes
+                    yield! customAttributesData()
+                |]
 
-        let mkXmlDocCustomAttributeData(s:string) =  mkXmlDocCustomAttributeDataLazy (lazy s)
-
-        let mkDefinitionLocationAttributeCustomAttributeData(line:int,column:int,filePath:string) =
-            { new CustomAttributeData() with
-                member __.Constructor =  typeof<TypeProviderDefinitionLocationAttribute>.GetConstructors().[0]
-                member __.ConstructorArguments = upcast [| |]
-                member __.NamedArguments =
-                    upcast [| CustomAttributeNamedArgument(typeof<TypeProviderDefinitionLocationAttribute>.GetProperty("FilePath"), CustomAttributeTypedArgument(typeof<string>, filePath));
-                                CustomAttributeNamedArgument(typeof<TypeProviderDefinitionLocationAttribute>.GetProperty("Line"), CustomAttributeTypedArgument(typeof<int>, line)) ;
-                                CustomAttributeNamedArgument(typeof<TypeProviderDefinitionLocationAttribute>.GetProperty("Column"), CustomAttributeTypedArgument(typeof<int>, column))
-                            |] }
-        let mkObsoleteAttributeCustomAttributeData(message:string, isError: bool) =
-            { new CustomAttributeData() with
-                    member __.Constructor =  typeof<ObsoleteAttribute>.GetConstructors() |> Array.find (fun x -> x.GetParameters().Length = 2)
-                    member __.ConstructorArguments = upcast [|CustomAttributeTypedArgument(typeof<string>, message) ; CustomAttributeTypedArgument(typeof<bool>, isError)  |]
-                    member __.NamedArguments = upcast [| |] }
-
-        let mkReflectedDefinitionCustomAttributeData() =
-            { new CustomAttributeData() with
-                    member __.Constructor =  typeof<ReflectedDefinitionAttribute>.GetConstructors().[0]
-                    member __.ConstructorArguments = upcast [| |]
-                    member __.NamedArguments = upcast [| |] }
-
-        type CustomAttributesImpl(isTgt, customAttributesData) =
-            let customAttributes = ResizeArray<CustomAttributeData>()
-            let mutable hideObjectMethods = false
-            let mutable nonNullable = false
-            let mutable obsoleteMessage = None
-            let mutable xmlDocDelayed = None
-            let mutable xmlDocAlwaysRecomputed = None
-            let mutable hasParamArray = false
-            let mutable hasReflectedDefinition = false
-
-            // XML doc text that we only compute once, if any. This must _not_ be forced until the ConstructorArguments
-            // property of the custom attribute is foced.
-            let xmlDocDelayedText =
-                lazy
-                    (match xmlDocDelayed with None -> assert false; "" | Some f -> f())
-
-            // Custom atttributes that we only compute once
-            let customAttributesOnce =
-                lazy
-                   [| if not isTgt then
-                          if hideObjectMethods then yield mkEditorHideMethodsCustomAttributeData()
-                          if nonNullable then yield mkAllowNullLiteralCustomAttributeData false
-                          match xmlDocDelayed with None -> () | Some _ -> customAttributes.Add(mkXmlDocCustomAttributeDataLazy xmlDocDelayedText)
-                          match xmlDocAlwaysRecomputed with None -> () | Some f -> yield mkXmlDocCustomAttributeData (f())
-                          match obsoleteMessage with None -> () | Some s -> customAttributes.Add(mkObsoleteAttributeCustomAttributeData s)
-                          if hasParamArray then yield mkParamArrayCustomAttributeData()
-                          if hasReflectedDefinition then yield mkReflectedDefinitionCustomAttributeData()
-                          yield! customAttributes
-                      yield! customAttributesData()|]
-
-            member __.AddDefinitionLocation(line:int,column:int,filePath:string) = customAttributes.Add(mkDefinitionLocationAttributeCustomAttributeData(line, column, filePath))
-            member __.AddObsolete(message: string, isError) = obsoleteMessage <- Some (message,isError)
-            member __.HasParamArray with get() = hasParamArray and set(v) = hasParamArray <- v
-            member __.HasReflectedDefinition with get() = hasReflectedDefinition and set(v) = hasReflectedDefinition <- v
-            member __.AddXmlDocComputed xmlDocFunction = xmlDocAlwaysRecomputed <- Some xmlDocFunction
-            member __.AddXmlDocDelayed xmlDocFunction = xmlDocDelayed <- Some xmlDocFunction
-            member __.AddXmlDoc xmlDoc =  xmlDocDelayed <- Some (K xmlDoc)
-            member __.HideObjectMethods with get() = hideObjectMethods and set v = hideObjectMethods <- v
-            member __.NonNullable with get () = nonNullable and set v = nonNullable <- v
-            member __.AddCustomAttribute(attribute) = customAttributes.Add(attribute)
-            member __.GetCustomAttributesData() =
-                let attrs = customAttributesOnce.Force()
-                let attrsWithDocHack =
-                    match xmlDocAlwaysRecomputed with
-                    | None ->
-                         attrs
-                    | Some f ->
-                        // Recomputed XML doc is evaluated on every call to GetCustomAttributesData() when in the IDE
-                        [| for ca in attrs ->
-                               if ca.Constructor.DeclaringType.Name = typeof<TypeProviderXmlDocAttribute>.Name then
-                                    { new CustomAttributeData() with
-                                        member __.Constructor =  ca.Constructor
-                                        member __.ConstructorArguments = upcast [| CustomAttributeTypedArgument(typeof<string>, f())  |]
-                                        member __.NamedArguments = upcast [| |] }
-                               else ca |]
-                attrsWithDocHack :> IList<_>
-
-
-    type ProvidedStaticParameter(isTgt: bool, parameterName:string, parameterType:Type, parameterDefaultValue:obj option, customAttributesData) =
-        inherit ParameterInfo()
-
-        let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
-
-        new (parameterName:string, parameterType:Type, ?parameterDefaultValue:obj) =
-            ProvidedStaticParameter(false, parameterName, parameterType, parameterDefaultValue, (K [| |]))
-
-        member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
-        member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
-        member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
-
-        member __.ParameterDefaultValue = parameterDefaultValue
-        member __.BelongsToTargetModel = isTgt
-
-        override __.RawDefaultValue = defaultArg parameterDefaultValue null
-        override __.Attributes = if parameterDefaultValue.IsNone then enum 0 else ParameterAttributes.Optional
-        override __.Position = 0
-        override __.ParameterType = parameterType
-        override __.Name = parameterName
-        override __.GetCustomAttributes(_inherit) = emptyAttributes
-        override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
-        override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
-
-    type ProvidedParameter(isTgt: bool, parameterName:string, attrs, parameterType:Type, optionalValue:obj option, customAttributesData) =
-
-        inherit ParameterInfo()
-
-        let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
-
-        new (parameterName:string, parameterType:Type, ?isOut:bool, ?optionalValue:obj) =
-            ProvidedParameter(false, parameterName, parameterType, isOut, optionalValue)
-
-        new (_isTgt, parameterName:string, parameterType:Type, isOut:bool option, optionalValue:obj option) =
-            let isOut = defaultArg isOut false
-            let attrs = (if isOut then ParameterAttributes.Out else enum 0) |||
-                        (match optionalValue with None -> enum 0 | Some _ -> ParameterAttributes.Optional ||| ParameterAttributes.HasDefault)
-            ProvidedParameter(false, parameterName, attrs, parameterType, optionalValue, K [| |])
-
-        member __.IsParamArray with set(v) = customAttributesImpl.HasParamArray <- v
-        member __.IsReflectedDefinition with set(v) = customAttributesImpl.HasReflectedDefinition <- v
-        member __.OptionalValue = optionalValue
-        member __.HasDefaultParameterValue = Option.isSome optionalValue
-        member __.BelongsToTargetModel = isTgt
-        member __.AddCustomAttribute(attribute) = customAttributesImpl.AddCustomAttribute(attribute)
-
-        override __.Name = parameterName
-        override __.ParameterType = parameterType
-        override __.Attributes = attrs
-        override __.RawDefaultValue = defaultArg optionalValue null
-        override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
-
-    and ProvidedConstructor(isTgt: bool, attrs: MethodAttributes, parameters: ProvidedParameter[], invokeCode: (Expr list -> Expr), baseCall, isImplicitCtor, customAttributesData) =
-
-        inherit ConstructorInfo()
-        let parameterInfos = parameters |> Array.map (fun p -> p :> ParameterInfo)
-        let mutable baseCall = baseCall
-        let mutable declaringType : ProvidedTypeDefinition option = None
-        let mutable isImplicitCtor = isImplicitCtor
-        let mutable attrs = attrs
-        let isStatic() = hasFlag attrs MethodAttributes.Static
-
-        let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
-
-        new (parameters, invokeCode) =
-            ProvidedConstructor(false, MethodAttributes.Public ||| MethodAttributes.RTSpecialName, Array.ofList parameters, invokeCode, None, false, K [| |])
-
-        member __.IsTypeInitializer
-            with get() = isStatic() && hasFlag attrs MethodAttributes.Private
-            and set(v) =
-                let typeInitializerAttributes = MethodAttributes.Static ||| MethodAttributes.Private
-                attrs <- if v then attrs ||| typeInitializerAttributes else attrs &&& ~~~typeInitializerAttributes
-
-        member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
-        member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
-        member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
-        member __.AddObsoleteAttribute (message,?isError) = customAttributesImpl.AddObsolete (message,defaultArg isError false)
-        member __.AddDefinitionLocation(line,column,filePath) = customAttributesImpl.AddDefinitionLocation(line, column, filePath)
-
-        member __.PatchDeclaringType x = patchOption declaringType (fun () -> declaringType <- Some x)
-        member this.BaseConstructorCall
-            with set (d:Expr list -> (ConstructorInfo * Expr list)) =
-                match baseCall with
-                | None -> baseCall <- Some d
-                | Some _ -> failwithf "ProvidedConstructor: base call already given for '%s'" this.Name
-
-        member __.IsImplicitConstructor with get() = isImplicitCtor and set v = isImplicitCtor <- v
-        member __.BaseCall = baseCall
-        member __.Parameters = parameters
-        member __.GetInvokeCode args = invokeCode args
-        member __.BelongsToTargetModel = isTgt
-        member __.DeclaringProvidedType = declaringType
-        member this.IsErased = (nonNone "DeclaringType" this.DeclaringProvidedType).IsErased
-
-        // Implement overloads
-        override __.GetParameters() = parameterInfos
-        override __.Attributes = attrs
-        override __.Name = if isStatic() then ".cctor" else ".ctor"
-        override __.DeclaringType = declaringType |> nonNone "DeclaringType" :> Type
-        override __.IsDefined(_attributeType, _inherit) = true
-
-        override this.Invoke(_invokeAttr, _binder, _parameters, _culture) = notRequired this "Invoke" this.Name
-        override this.Invoke(_obj, _invokeAttr, _binder, _parameters, _culture) = notRequired this "Invoke" this.Name
-        override this.ReflectedType = notRequired this "ReflectedType" this.Name
-        override this.GetMethodImplementationFlags() = notRequired this "GetMethodImplementationFlags" this.Name
-        override this.MethodHandle = notRequired this "MethodHandle" this.Name
-        override __.GetCustomAttributes(_inherit) = emptyAttributes
-        override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
-        override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
-
-    and ProvidedMethod(isTgt: bool, methodName: string, attrs: MethodAttributes, parameters: ProvidedParameter[], returnType: Type, invokeCode: (Expr list -> Expr) option, staticParams, staticParamsApply, customAttributesData) =
-        inherit MethodInfo()
-        let parameterInfos = parameters |> Array.map (fun p -> p :> ParameterInfo)
-
-        let mutable declaringType : ProvidedTypeDefinition option = None
-        let mutable attrs = attrs
-        let mutable staticParams = staticParams
-        let mutable staticParamsApply = staticParamsApply
-        let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
-        let mutable returnTypeFixCache = None
-
-        /// The public constructor for the design-time/source model
-        new (methodName, parameters, returnType, ?invokeCode, ?isStatic) =
-            let isStatic = defaultArg isStatic false
-            let attrs = if isStatic then MethodAttributes.Public ||| MethodAttributes.Static else MethodAttributes.Public
-            ProvidedMethod(false, methodName, attrs, Array.ofList parameters, returnType, invokeCode, [], None, K [| |])
-
-        member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
-        member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
-        member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
-        member __.AddObsoleteAttribute (message,?isError) = customAttributesImpl.AddObsolete (message,defaultArg isError false)
-        member __.AddDefinitionLocation(line,column,filePath) = customAttributesImpl.AddDefinitionLocation(line, column, filePath)
-        member __.AddCustomAttribute(attribute) = customAttributesImpl.AddCustomAttribute(attribute)
-
-        member __.SetMethodAttrs attributes = attrs <- attributes
-        member __.AddMethodAttrs attributes = attrs <- attrs ||| attributes
-        member __.PatchDeclaringType x = patchOption declaringType (fun () -> declaringType <- Some x)
-
-        /// Abstract a type to a parametric-type. Requires "formal parameters" and "instantiation function".
-        member __.DefineStaticParameters(parameters: ProvidedStaticParameter list, instantiationFunction: (string -> obj[] -> ProvidedMethod)) =
-            staticParams      <- parameters
-            staticParamsApply <- Some instantiationFunction
-
-        /// Get ParameterInfo[] for the parametric type parameters
-        member __.GetStaticParametersInternal() = [| for p in staticParams -> p :> ParameterInfo |]
-
-        /// Instantiate parametric method
-        member this.ApplyStaticArguments(mangledName:string, args:obj[]) =
-            if staticParams.Length <> args.Length then
-                failwithf "ProvidedMethod: expecting %d static parameters but given %d for method %s" staticParams.Length args.Length methodName
-            if staticParams.Length > 0 then
-                match staticParamsApply with
-                | None -> failwith "ProvidedMethod: DefineStaticParameters was not called"
-                | Some f -> f mangledName args
-            else
-                this
-
-        member __.Parameters = parameters
-        member __.GetInvokeCode = invokeCode
-        member __.StaticParams = staticParams
-        member __.StaticParamsApply = staticParamsApply
-        member __.BelongsToTargetModel = isTgt
-        member __.DeclaringProvidedType = declaringType
-        member this.IsErased = (nonNone "DeclaringType" this.DeclaringProvidedType).IsErased
-
-       // Implement overloads
-        override __.GetParameters() = parameterInfos
-
-        override __.Attributes = attrs
-
-        override __.Name = methodName
-
-        override __.DeclaringType = declaringType |> nonNone "DeclaringType" :> Type
-
-        override __.IsDefined(_attributeType, _inherit): bool = true
-
-        override __.MemberType = MemberTypes.Method
-
-        override x.CallingConvention =
-            let cc = CallingConventions.Standard
-            let cc = if not x.IsStatic then cc ||| CallingConventions.HasThis else cc
-            cc
-
-        override __.ReturnType =
-            if isTgt then
-                match returnTypeFixCache with
-                | Some returnTypeFix -> returnTypeFix
+        member __.AddDefinitionLocation(line:int, column:int, filePath:string) = customAttributes.Add(mkDefinitionLocationAttributeCustomAttributeData(line, column, filePath))
+        member __.AddObsolete(message: string, isError) = obsoleteMessage <- Some (message, isError)
+        member __.HasParamArray with get() = hasParamArray and set(v) = hasParamArray <- v
+        member __.HasReflectedDefinition with get() = hasReflectedDefinition and set(v) = hasReflectedDefinition <- v
+        member __.AddXmlDocComputed xmlDocFunction = xmlDocAlwaysRecomputed <- Some xmlDocFunction
+        member __.AddXmlDocDelayed xmlDocFunction = xmlDocDelayed <- Some xmlDocFunction
+        member __.AddXmlDoc xmlDoc =  xmlDocDelayed <- Some (K xmlDoc)
+        member __.HideObjectMethods with get() = hideObjectMethods and set v = hideObjectMethods <- v
+        member __.NonNullable with get () = nonNullable and set v = nonNullable <- v
+        member __.AddCustomAttribute(attribute) = customAttributes.Add(attribute)
+        member __.GetCustomAttributesData() =
+            let attrs = customAttributesOnce.Force()
+            let attrsWithDocHack =
+                match xmlDocAlwaysRecomputed with
                 | None ->
-                    let returnTypeFix =
-                        match returnType.Namespace, returnType.Name with
-                        | "System", "Void"->
-                            if ImportProvidedMethodBaseAsILMethodRef_OnStack_HACK() then
-                                typeof<Void>
-                            else
-                                returnType
-                        | _ -> returnType
-                    returnTypeFixCache <- Some returnTypeFix
-                    returnTypeFix
-            else
-                returnType
-
-        override __.ReturnParameter = null // REVIEW: Give it a name and type?
-
-        override __.ToString() = "Method " + methodName
-
-        // These don't have to return fully accurate results - they are used
-        // by the F# Quotations library function SpecificCall as a pre-optimization
-        // when comparing methods
-        override __.MetadataToken = genToken()
-        override __.MethodHandle = RuntimeMethodHandle()
-
-        override this.ReturnTypeCustomAttributes = notRequired this "ReturnTypeCustomAttributes" methodName
-        override this.GetBaseDefinition() = notRequired this "GetBaseDefinition" methodName
-        override this.GetMethodImplementationFlags() = notRequired this "GetMethodImplementationFlags" methodName
-        override this.Invoke(_obj, _invokeAttr, _binder, _parameters, _culture) = notRequired this "Invoke" methodName
-        override this.ReflectedType = notRequired this "ReflectedType" methodName
-        override __.GetCustomAttributes(_inherit) = emptyAttributes
-        override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
-        override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
+                        attrs
+                | Some f ->
+                    // Recomputed XML doc is evaluated on every call to GetCustomAttributesData() when in the IDE
+                    [| for ca in attrs ->
+                            if ca.Constructor.DeclaringType.Name = typeof<TypeProviderXmlDocAttribute>.Name then
+                                { new CustomAttributeData() with
+                                    member __.Constructor =  ca.Constructor
+                                    member __.ConstructorArguments = upcast [| CustomAttributeTypedArgument(typeof<string>, f())  |]
+                                    member __.NamedArguments = upcast [| |] }
+                            else ca |]
+            attrsWithDocHack :> IList<_>
 
 
-    and ProvidedProperty(isTgt: bool, propertyName: string, attrs: PropertyAttributes, propertyType: Type, isStatic: bool, getter: (unit -> MethodInfo) option, setter: (unit -> MethodInfo) option, indexParameters: ProvidedParameter[], customAttributesData) =
-        inherit PropertyInfo()
+type ProvidedStaticParameter(isTgt: bool, parameterName:string, parameterType:Type, parameterDefaultValue:obj option, customAttributesData) =
+    inherit ParameterInfo()
 
-        let mutable declaringType : ProvidedTypeDefinition option = None
+    let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
 
-        let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
+    new (parameterName:string, parameterType:Type, ?parameterDefaultValue:obj) =
+        ProvidedStaticParameter(false, parameterName, parameterType, parameterDefaultValue, (K [| |]))
 
-        /// The public constructor for the design-time/source model
-        new (propertyName, propertyType, ?getterCode, ?setterCode, ?isStatic, ?indexParameters) =
-            let isStatic = defaultArg isStatic false
-            let indexParameters = defaultArg indexParameters []
-            let pattrs = (if isStatic then MethodAttributes.Static else enum<MethodAttributes>(0)) ||| MethodAttributes.Public ||| MethodAttributes.SpecialName
-            let getter = getterCode |> Option.map (fun _ -> ProvidedMethod(false, "get_" + propertyName, pattrs, Array.ofList indexParameters, propertyType, getterCode, [], None, K [| |]) :> MethodInfo)
-            let setter = setterCode |> Option.map (fun _ -> ProvidedMethod(false, "set_" + propertyName, pattrs, [| yield! indexParameters; yield ProvidedParameter(false, "value",propertyType,isOut=Some false,optionalValue=None) |], typeof<Void>, setterCode, [], None, K [| |]) :> MethodInfo)
-            ProvidedProperty(false, propertyName, PropertyAttributes.None, propertyType, isStatic, Option.map K getter, Option.map K setter, Array.ofList indexParameters, K [| |])
+    member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
+    member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
+    member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
 
-        member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
-        member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
-        member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
-        member __.AddObsoleteAttribute (message,?isError) = customAttributesImpl.AddObsolete (message,defaultArg isError false)
-        member __.AddDefinitionLocation(line,column,filePath) = customAttributesImpl.AddDefinitionLocation(line, column, filePath)
-        member __.AddCustomAttribute attribute = customAttributesImpl.AddCustomAttribute attribute
-        override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
+    member __.ParameterDefaultValue = parameterDefaultValue
+    member __.BelongsToTargetModel = isTgt
 
-        member __.PatchDeclaringType x =
-            if not isTgt then
-                match getter with Some f -> (match f() with (:? ProvidedMethod as g) -> g.PatchDeclaringType x | _ -> ()) | _ -> ()
-                match setter with Some f -> (match f() with (:? ProvidedMethod as s) -> s.PatchDeclaringType x | _ -> ()) | _ -> ()
-            patchOption declaringType (fun () -> declaringType <- Some x)
+    override __.RawDefaultValue = defaultArg parameterDefaultValue null
+    override __.Attributes = if parameterDefaultValue.IsNone then enum 0 else ParameterAttributes.Optional
+    override __.Position = 0
+    override __.ParameterType = parameterType
+    override __.Name = parameterName
+    override __.GetCustomAttributes(_inherit) = emptyAttributes
+    override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
+    override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
 
-        member __.IsStatic = isStatic
-        member __.IndexParameters = indexParameters
-        member __.BelongsToTargetModel = isTgt
-        member __.Getter = getter
-        member __.Setter = setter
+type ProvidedParameter(isTgt: bool, parameterName:string, attrs, parameterType:Type, optionalValue:obj option, customAttributesData) =
 
-        override __.PropertyType = propertyType
-        override this.SetValue(_obj, _value, _invokeAttr, _binder, _index, _culture) = notRequired this "SetValue" propertyName
-        override this.GetAccessors _nonPublic = notRequired this "nonPublic" propertyName
-        override __.GetGetMethod _nonPublic = match getter with None -> null | Some g -> g()
-        override __.GetSetMethod _nonPublic = match setter with None -> null | Some s -> s()
-        override __.GetIndexParameters() = [| for p in indexParameters -> upcast p |]
-        override __.Attributes = attrs
-        override __.CanRead = getter.IsSome
-        override __.CanWrite = setter.IsSome
-        override this.GetValue(_obj, _invokeAttr, _binder, _index, _culture): obj = notRequired this "GetValue" propertyName
-        override __.Name = propertyName
-        override __.DeclaringType = declaringType |> nonNone "DeclaringType":> Type
-        override __.MemberType: MemberTypes = MemberTypes.Property
+    inherit ParameterInfo()
 
-        override this.ReflectedType = notRequired this "ReflectedType" propertyName
-        override __.GetCustomAttributes(_inherit) = emptyAttributes
-        override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
-        override this.IsDefined(_attributeType, _inherit) = notRequired this "IsDefined" propertyName
+    let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
 
-    and ProvidedEvent(isTgt: bool, eventName:string, attrs: EventAttributes, eventHandlerType:Type, isStatic: bool, adder: (unit -> MethodInfo), remover: (unit -> MethodInfo), customAttributesData) =
-        inherit EventInfo()
+    new (parameterName:string, parameterType:Type, ?isOut:bool, ?optionalValue:obj) =
+        ProvidedParameter(false, parameterName, parameterType, isOut, optionalValue)
 
-        let mutable declaringType : ProvidedTypeDefinition option = None
+    new (_isTgt, parameterName:string, parameterType:Type, isOut:bool option, optionalValue:obj option) =
+        let isOut = defaultArg isOut false
+        let attrs = (if isOut then ParameterAttributes.Out else enum 0) |||
+                    (match optionalValue with None -> enum 0 | Some _ -> ParameterAttributes.Optional ||| ParameterAttributes.HasDefault)
+        ProvidedParameter(false, parameterName, attrs, parameterType, optionalValue, K [| |])
 
-        let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
+    member __.IsParamArray with set(v) = customAttributesImpl.HasParamArray <- v
+    member __.IsReflectedDefinition with set(v) = customAttributesImpl.HasReflectedDefinition <- v
+    member __.OptionalValue = optionalValue
+    member __.HasDefaultParameterValue = Option.isSome optionalValue
+    member __.BelongsToTargetModel = isTgt
+    member __.AddCustomAttribute(attribute) = customAttributesImpl.AddCustomAttribute(attribute)
 
-        new (eventName, eventHandlerType, adderCode, removerCode, ?isStatic) =
-            let isStatic = defaultArg isStatic false
-            let pattrs = (if isStatic then MethodAttributes.Static else enum<MethodAttributes>(0)) ||| MethodAttributes.Public ||| MethodAttributes.SpecialName
-            let adder = ProvidedMethod(false, "add_" + eventName, pattrs, [| ProvidedParameter(false, "handler", eventHandlerType, isOut=Some false, optionalValue=None) |], typeof<Void>, Some adderCode, [], None, K [| |])  :> MethodInfo
-            let remover = ProvidedMethod(false, "remove_" + eventName, pattrs, [| ProvidedParameter(false, "handler", eventHandlerType, isOut=Some false, optionalValue=None) |], typeof<Void>, Some removerCode, [], None, K [| |])  :> MethodInfo
-            ProvidedEvent(false, eventName, EventAttributes.None, eventHandlerType, isStatic, K adder, K remover, K [| |])
+    override __.Name = parameterName
+    override __.ParameterType = parameterType
+    override __.Attributes = attrs
+    override __.RawDefaultValue = defaultArg optionalValue null
+    override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
 
-        member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
-        member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
-        member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
-        member __.AddDefinitionLocation(line,column,filePath) = customAttributesImpl.AddDefinitionLocation(line, column, filePath)
+and ProvidedConstructor(isTgt: bool, attrs: MethodAttributes, parameters: ProvidedParameter[], invokeCode: (Expr list -> Expr), baseCall, isImplicitCtor, customAttributesData) =
 
-        member __.PatchDeclaringType x =
-            if not isTgt then
-                match adder() with :? ProvidedMethod as a -> a.PatchDeclaringType x | _ -> ()
-                match remover() with :? ProvidedMethod as r -> r.PatchDeclaringType x | _ -> ()
-            patchOption declaringType (fun () -> declaringType <- Some x)
+    inherit ConstructorInfo()
+    let parameterInfos = parameters |> Array.map (fun p -> p :> ParameterInfo)
+    let mutable baseCall = baseCall
+    let mutable declaringType : ProvidedTypeDefinition option = None
+    let mutable isImplicitCtor = isImplicitCtor
+    let mutable attrs = attrs
+    let isStatic() = hasFlag attrs MethodAttributes.Static
 
-        member __.IsStatic = isStatic
-        member __.Adder = adder()
-        member __.Remover = remover()
-        member __.BelongsToTargetModel = isTgt
+    let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
 
-        override __.EventHandlerType = eventHandlerType
-        override __.GetAddMethod _nonPublic = adder()
-        override __.GetRemoveMethod _nonPublic = remover()
-        override __.Attributes = attrs
-        override __.Name = eventName
-        override __.DeclaringType = declaringType |> nonNone "DeclaringType":> Type
-        override __.MemberType: MemberTypes = MemberTypes.Event
+    new (parameters, invokeCode) =
+        ProvidedConstructor(false, MethodAttributes.Public ||| MethodAttributes.RTSpecialName ||| MethodAttributes.HideBySig, Array.ofList parameters, invokeCode, None, false, K [| |])
 
-        override this.GetRaiseMethod _nonPublic = notRequired this "GetRaiseMethod" eventName
-        override this.ReflectedType = notRequired this "ReflectedType" eventName
-        override __.GetCustomAttributes(_inherit) = emptyAttributes
-        override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
-        override this.IsDefined(_attributeType, _inherit) = notRequired this "IsDefined" eventName
-        override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
+    member __.IsTypeInitializer
+        with get() = isStatic() && hasFlag attrs MethodAttributes.Private
+        and set(v) =
+            let typeInitializerAttributes = MethodAttributes.Static ||| MethodAttributes.Private
+            attrs <- if v then attrs ||| typeInitializerAttributes else attrs &&& ~~~typeInitializerAttributes
 
-    and ProvidedField(isTgt: bool, fieldName:string, attrs, fieldType:Type, rawConstantValue: obj, customAttributesData) =
-        inherit FieldInfo()
+    member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
+    member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
+    member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
+    member __.AddObsoleteAttribute (message, ?isError) = customAttributesImpl.AddObsolete (message, defaultArg isError false)
+    member __.AddDefinitionLocation(line, column, filePath) = customAttributesImpl.AddDefinitionLocation(line, column, filePath)
 
-        let mutable declaringType : ProvidedTypeDefinition option = None
+    member __.PatchDeclaringType x = patchOption declaringType (fun () -> declaringType <- Some x)
+    member this.BaseConstructorCall
+        with set (d:Expr list -> (ConstructorInfo * Expr list)) =
+            match baseCall with
+            | None -> baseCall <- Some d
+            | Some _ -> failwithf "ProvidedConstructor: base call already given for '%s'" this.Name
 
-        let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
-        let mutable attrs = attrs
+    member __.IsImplicitConstructor with get() = isImplicitCtor and set v = isImplicitCtor <- v
+    member __.BaseCall = baseCall
+    member __.Parameters = parameters
+    member __.GetInvokeCode args = invokeCode args
+    member __.BelongsToTargetModel = isTgt
+    member __.DeclaringProvidedType = declaringType
+    member this.IsErased = (nonNone "DeclaringType" this.DeclaringProvidedType).IsErased
 
-        new (fieldName:string, fieldType:Type) = ProvidedField(false, fieldName, FieldAttributes.Private, fieldType, null, (K [| |]))
+    // Implement overloads
+    override __.GetParameters() = parameterInfos
+    override __.Attributes = attrs
+    override __.Name = if isStatic() then ".cctor" else ".ctor"
+    override __.DeclaringType = declaringType |> nonNone "DeclaringType" :> Type
+    override __.IsDefined(_attributeType, _inherit) = true
 
-        member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
-        member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
-        member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
-        member __.AddObsoleteAttribute (message,?isError) = customAttributesImpl.AddObsolete (message,defaultArg isError false)
-        member __.AddDefinitionLocation(line,column,filePath) = customAttributesImpl.AddDefinitionLocation(line, column, filePath)
+    override this.Invoke(_invokeAttr, _binder, _parameters, _culture) = notRequired this "Invoke" this.Name
+    override this.Invoke(_obj, _invokeAttr, _binder, _parameters, _culture) = notRequired this "Invoke" this.Name
+    override this.ReflectedType = notRequired this "ReflectedType" this.Name
+    override this.GetMethodImplementationFlags() = notRequired this "GetMethodImplementationFlags" this.Name
+    override this.MethodHandle = notRequired this "MethodHandle" this.Name
+    override __.GetCustomAttributes(_inherit) = emptyAttributes
+    override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
+    override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
 
-        member __.SetFieldAttributes attributes = attrs <- attributes
-        member __.BelongsToTargetModel = isTgt
+and ProvidedMethod(isTgt: bool, methodName: string, attrs: MethodAttributes, parameters: ProvidedParameter[], returnType: Type, invokeCode: (Expr list -> Expr) option, staticParams, staticParamsApply, customAttributesData) =
+    inherit MethodInfo()
+    let parameterInfos = parameters |> Array.map (fun p -> p :> ParameterInfo)
 
-        member __.PatchDeclaringType x = patchOption declaringType (fun () -> declaringType <- Some x)
+    let mutable declaringType : ProvidedTypeDefinition option = None
+    let mutable attrs = attrs
+    let mutable staticParams = staticParams
+    let mutable staticParamsApply = staticParamsApply
+    let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
+    let mutable returnTypeFixCache = None
 
-        override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
+    /// The public constructor for the design-time/source model
+    new (methodName, parameters, returnType, ?invokeCode, ?isStatic) =
+        let isStatic = defaultArg isStatic false
+        let attrs = if isStatic then MethodAttributes.Public ||| MethodAttributes.Static else MethodAttributes.Public
+        ProvidedMethod(false, methodName, attrs, Array.ofList parameters, returnType, invokeCode, [], None, K [| |])
 
-        // Implement overloads
-        override __.FieldType = fieldType
-        override __.GetRawConstantValue() = rawConstantValue
-        override __.Attributes = attrs
-        override __.Name = fieldName
-        override __.DeclaringType = declaringType |> nonNone "DeclaringType":> Type
-        override __.MemberType: MemberTypes = MemberTypes.Field
+    member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
+    member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
+    member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
+    member __.AddObsoleteAttribute (message, ?isError) = customAttributesImpl.AddObsolete (message, defaultArg isError false)
+    member __.AddDefinitionLocation(line, column, filePath) = customAttributesImpl.AddDefinitionLocation(line, column, filePath)
+    member __.AddCustomAttribute(attribute) = customAttributesImpl.AddCustomAttribute(attribute)
 
-        override this.ReflectedType = notRequired this "ReflectedType" fieldName
-        override __.GetCustomAttributes(_inherit) = emptyAttributes
-        override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
-        override this.IsDefined(_attributeType, _inherit) = notRequired this "IsDefined" fieldName
+    member __.SetMethodAttrs attributes = attrs <- attributes
+    member __.AddMethodAttrs attributes = attrs <- attrs ||| attributes
+    member __.PatchDeclaringType x = patchOption declaringType (fun () -> declaringType <- Some x)
 
-        override this.SetValue(_obj, _value, _invokeAttr, _binder, _culture) = notRequired this "SetValue" fieldName
-        override this.GetValue(_obj): obj = notRequired this "GetValue" fieldName
-        override this.FieldHandle = notRequired this "FieldHandle" fieldName
+    /// Abstract a type to a parametric-type. Requires "formal parameters" and "instantiation function".
+    member __.DefineStaticParameters(parameters: ProvidedStaticParameter list, instantiationFunction: (string -> obj[] -> ProvidedMethod)) =
+        staticParams      <- parameters
+        staticParamsApply <- Some instantiationFunction
 
-        static member Literal(fieldName:string, fieldType:Type, literalValue: obj) =
-            ProvidedField(false, fieldName, (FieldAttributes.Static ||| FieldAttributes.Literal ||| FieldAttributes.Public), fieldType, literalValue, K [| |])
+    /// Get ParameterInfo[] for the parametric type parameters
+    member __.GetStaticParametersInternal() = [| for p in staticParams -> p :> ParameterInfo |]
+
+    /// Instantiate parametric method
+    member this.ApplyStaticArguments(mangledName:string, args:obj[]) =
+        if staticParams.Length <> args.Length then
+            failwithf "ProvidedMethod: expecting %d static parameters but given %d for method %s" staticParams.Length args.Length methodName
+        if staticParams.Length > 0 then
+            match staticParamsApply with
+            | None -> failwith "ProvidedMethod: DefineStaticParameters was not called"
+            | Some f -> f mangledName args
+        else
+            this
+
+    member __.Parameters = parameters
+    member __.GetInvokeCode = invokeCode
+    member __.StaticParams = staticParams
+    member __.StaticParamsApply = staticParamsApply
+    member __.BelongsToTargetModel = isTgt
+    member __.DeclaringProvidedType = declaringType
+    member this.IsErased = (nonNone "DeclaringType" this.DeclaringProvidedType).IsErased
+
+    // Implement overloads
+    override __.GetParameters() = parameterInfos
+
+    override this.Attributes =
+        match invokeCode, this.DeclaringProvidedType with
+        | None, Some pt when pt.IsInterface || pt.IsAbstract ->
+                attrs ||| MethodAttributes.Abstract ||| MethodAttributes.Virtual ||| MethodAttributes.HideBySig ||| MethodAttributes.NewSlot
+        | _ -> attrs
 
 
-    and ProvidedMeasureBuilder() =
+    override __.Name = methodName
 
-        // TODO: this shouldn't be hardcoded, but without creating a dependency on FSharp.Compiler.Service
-        // there seems to be no way to check if a type abbreviation exists
-        static let unitNamesTypeAbbreviations =
-            [ "meter"; "hertz"; "newton"; "pascal"; "joule"; "watt"; "coulomb";
-              "volt"; "farad"; "ohm"; "siemens"; "weber"; "tesla"; "henry"
-              "lumen"; "lux"; "becquerel"; "gray"; "sievert"; "katal" ]
-            |> Set.ofList
+    override __.DeclaringType = declaringType |> nonNone "DeclaringType" :> Type
 
-        static let unitSymbolsTypeAbbreviations =
-            [ "m"; "kg"; "s"; "A"; "K"; "mol"; "cd"; "Hz"; "N"; "Pa"; "J"; "W"; "C"
-              "V"; "F"; "S"; "Wb"; "T"; "lm"; "lx"; "Bq"; "Gy"; "Sv"; "kat"; "H" ]
-            |> Set.ofList
+    override __.IsDefined(_attributeType, _inherit): bool = true
 
-        static member One = typeof<CompilerServices.MeasureOne>
-        static member Product (measure1, measure2) = typedefof<CompilerServices.MeasureProduct<_,_>>.MakeGenericType [| measure1;measure2 |]
-        static member Inverse denominator = typedefof<CompilerServices.MeasureInverse<_>>.MakeGenericType [| denominator |]
-        static member Ratio (numerator, denominator) = ProvidedMeasureBuilder.Product(numerator, ProvidedMeasureBuilder.Inverse denominator)
-        static member Square m = ProvidedMeasureBuilder.Product(m, m)
+    override __.MemberType = MemberTypes.Method
 
-        // If the unit is not a valid type, instead
-        // of assuming it's a type abbreviation, which may not be the case and cause a
-        // problem later on, check the list of valid abbreviations
-        static member SI (unitName:string) =
-            let mLowerCase = unitName.ToLowerInvariant()
-            let abbreviation =
-                if unitNamesTypeAbbreviations.Contains mLowerCase then
-                    Some ("Microsoft.FSharp.Data.UnitSystems.SI.UnitNames", mLowerCase)
-                elif unitSymbolsTypeAbbreviations.Contains unitName then
-                    Some ("Microsoft.FSharp.Data.UnitSystems.SI.UnitSymbols", unitName)
-                else
-                    None
-            match abbreviation with
-            | Some (ns, unitName) ->
-                ProvidedTypeSymbol(ProvidedTypeSymbolKind.FSharpTypeAbbreviation(typeof<Core.CompilerServices.MeasureOne>.Assembly,ns,[| unitName |]), []) :> Type
+    override x.CallingConvention =
+        let cc = CallingConventions.Standard
+        let cc = if not x.IsStatic then cc ||| CallingConventions.HasThis else cc
+        cc
+
+    override __.ReturnType =
+        if isTgt then
+            match returnTypeFixCache with
+            | Some returnTypeFix -> returnTypeFix
             | None ->
-                typedefof<list<int>>.Assembly.GetType("Microsoft.FSharp.Data.UnitSystems.SI.UnitNames." + mLowerCase)
+                let returnTypeFix =
+                    match returnType.Namespace, returnType.Name with
+                    | "System", "Void"->
+                        if ImportProvidedMethodBaseAsILMethodRef_OnStack_HACK() then
+                            typeof<Void>
+                        else
+                            returnType
+                    | _ -> returnType
+                returnTypeFixCache <- Some returnTypeFix
+                returnTypeFix
+        else
+            returnType
 
-        static member AnnotateType (basic, argument) = ProvidedTypeSymbol(Generic basic, argument) :> Type
+    override __.ReturnParameter = null // REVIEW: Give it a name and type?
 
-    and
-      [<RequireQualifiedAccess; NoComparison>]
-      TypeContainer =
-      | Namespace of (unit -> Assembly) * string // namespace
-      | Type of ProvidedTypeDefinition
-      | TypeToBeDecided
+    override __.ToString() = "Method " + methodName
 
-    /// backingDataSource is a set of functions to fetch backing data for the ProvidedTypeDefinition,
-    /// and allows us to reuse this type for both target and source models, even when the
-    /// source model is being incrementally updates by further .AddMember calls
-    and ProvidedTypeDefinition(isTgt: bool, container:TypeContainer, className: string, getBaseType: (unit -> Type option), attrs: TypeAttributes, getEnumUnderlyingType, staticParams, staticParamsApply, backingDataSource, customAttributesData, nonNullable, hideObjectMethods) as this =
-        inherit TypeDelegator()
+    // These don't have to return fully accurate results - they are used
+    // by the F# Quotations library function SpecificCall as a pre-optimization
+    // when comparing methods
+    override __.MetadataToken = genToken()
+    override __.MethodHandle = RuntimeMethodHandle()
 
-        do match container, !ProvidedTypeDefinition.Logger with
-           | TypeContainer.Namespace _, Some logger when not isTgt -> logger (sprintf "Creating ProvidedTypeDefinition %s [%d]" className (System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode this))
-           | _ -> ()
+    override this.ReturnTypeCustomAttributes = notRequired this "ReturnTypeCustomAttributes" methodName
+    override this.GetBaseDefinition() = notRequired this "GetBaseDefinition" methodName
+    override this.GetMethodImplementationFlags() = notRequired this "GetMethodImplementationFlags" methodName
+    override this.Invoke(_obj, _invokeAttr, _binder, _parameters, _culture) = notRequired this "Invoke" methodName
+    override this.ReflectedType = notRequired this "ReflectedType" methodName
+    override __.GetCustomAttributes(_inherit) = emptyAttributes
+    override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
+    override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
 
-        static let defaultAttributes (isErased, isSealed, isInterface) =
-            TypeAttributes.Public |||
-            (if isInterface then TypeAttributes.Interface else TypeAttributes.Class) |||
-            (if isSealed then TypeAttributes.Sealed else enum 0) |||
-            enum (if isErased then int32 TypeProviderTypeAttributes.IsErased else 0)
 
-        // state
-        let mutable attrs   = attrs
-        let mutable enumUnderlyingType = lazy getEnumUnderlyingType()
-        let mutable baseType =  lazy getBaseType()
+and ProvidedProperty(isTgt: bool, propertyName: string, attrs: PropertyAttributes, propertyType: Type, isStatic: bool, getter: (unit -> MethodInfo) option, setter: (unit -> MethodInfo) option, indexParameters: ProvidedParameter[], customAttributesData) =
+    inherit PropertyInfo()
 
-        /// Represents the evaluated members so far
-        let members = ResizeArray<MemberInfo>()
+    let mutable declaringType : ProvidedTypeDefinition option = None
 
-        /// Represents delayed members, as yet uncomputed
-        let membersQueue = ResizeArray<(unit -> MemberInfo[])>()
+    let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
 
-        let mutable staticParamsDefined = false
-        let mutable staticParams = staticParams
-        let mutable staticParamsApply = staticParamsApply
-        let mutable container = container
-        let interfaceImpls = ResizeArray<Type>()
-        let interfacesQueue = ResizeArray<unit -> Type[]>()
-        let methodOverrides = ResizeArray<ProvidedMethod * MethodInfo>()
-        let methodOverridesQueue = ResizeArray<unit -> (ProvidedMethod * MethodInfo)[]>()
+    /// The public constructor for the design-time/source model
+    new (propertyName, propertyType, ?getterCode, ?setterCode, ?isStatic, ?indexParameters) =
+        let isStatic = defaultArg isStatic false
+        let indexParameters = defaultArg indexParameters []
+        let pattrs = (if isStatic then MethodAttributes.Static else enum<MethodAttributes>(0)) ||| MethodAttributes.Public ||| MethodAttributes.SpecialName
+        let getter = getterCode |> Option.map (fun _ -> ProvidedMethod(false, "get_" + propertyName, pattrs, Array.ofList indexParameters, propertyType, getterCode, [], None, K [| |]) :> MethodInfo)
+        let setter = setterCode |> Option.map (fun _ -> ProvidedMethod(false, "set_" + propertyName, pattrs, [| yield! indexParameters; yield ProvidedParameter(false, "value", propertyType, isOut=Some false, optionalValue=None) |], typeof<Void>, setterCode, [], None, K [| |]) :> MethodInfo)
+        ProvidedProperty(false, propertyName, PropertyAttributes.None, propertyType, isStatic, Option.map K getter, Option.map K setter, Array.ofList indexParameters, K [| |])
 
-        do match backingDataSource with
-           | None -> ()
-           | Some (_, getFreshMembers, getFreshInterfaces, getFreshMethodOverrides) ->
-               membersQueue.Add getFreshMembers
-               interfacesQueue.Add getFreshInterfaces
-               methodOverridesQueue.Add getFreshMethodOverrides
+    member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
+    member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
+    member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
+    member __.AddObsoleteAttribute (message, ?isError) = customAttributesImpl.AddObsolete (message, defaultArg isError false)
+    member __.AddDefinitionLocation(line, column, filePath) = customAttributesImpl.AddDefinitionLocation(line, column, filePath)
+    member __.AddCustomAttribute attribute = customAttributesImpl.AddCustomAttribute attribute
+    override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
 
-        let checkFreshMembers() =
-            match backingDataSource with
-            | None -> false
-            | Some (checkFreshMembers, _getFreshMembers, _getFreshInterfaces, _getFreshMethodOverrides) -> checkFreshMembers()
+    member __.PatchDeclaringType x =
+        if not isTgt then
+            match getter with Some f -> (match f() with (:? ProvidedMethod as g) -> g.PatchDeclaringType x | _ -> ()) | _ -> ()
+            match setter with Some f -> (match f() with (:? ProvidedMethod as s) -> s.PatchDeclaringType x | _ -> ()) | _ -> ()
+        patchOption declaringType (fun () -> declaringType <- Some x)
 
-        let moreMembers() =
-            membersQueue.Count > 0 || checkFreshMembers()
+    member __.IsStatic = isStatic
+    member __.IndexParameters = indexParameters
+    member __.BelongsToTargetModel = isTgt
+    member __.Getter = getter
+    member __.Setter = setter
 
-        let evalMembers() =
-            if moreMembers() then
-               // re-add the getFreshMembers call from the backingDataSource to make sure we fetch the latest translated members from the source model
-                match backingDataSource with
-                | None -> ()
-                | Some (_, getFreshMembers, _getFreshInterfaces, _getFreshMethodOverrides) ->
-                    membersQueue.Add getFreshMembers
+    override __.PropertyType = propertyType
+    override this.SetValue(_obj, _value, _invokeAttr, _binder, _index, _culture) = notRequired this "SetValue" propertyName
+    override this.GetAccessors _nonPublic = notRequired this "nonPublic" propertyName
+    override __.GetGetMethod _nonPublic = match getter with None -> null | Some g -> g()
+    override __.GetSetMethod _nonPublic = match setter with None -> null | Some s -> s()
+    override __.GetIndexParameters() = [| for p in indexParameters -> upcast p |]
+    override __.Attributes = attrs
+    override __.CanRead = getter.IsSome
+    override __.CanWrite = setter.IsSome
+    override this.GetValue(_obj, _invokeAttr, _binder, _index, _culture): obj = notRequired this "GetValue" propertyName
+    override __.Name = propertyName
+    override __.DeclaringType = declaringType |> nonNone "DeclaringType":> Type
+    override __.MemberType: MemberTypes = MemberTypes.Property
 
-                let elems = membersQueue |> Seq.toArray // take a copy in case more elements get added
-                membersQueue.Clear()
-                for  f in elems do
-                    for m in f() do
-                        members.Add m
+    override this.ReflectedType = notRequired this "ReflectedType" propertyName
+    override __.GetCustomAttributes(_inherit) = emptyAttributes
+    override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
+    override this.IsDefined(_attributeType, _inherit) = notRequired this "IsDefined" propertyName
 
-                        // Implicitly add the property and event methods (only for the source model where they are not explicitly declared)
-                        match m with
-                        | :? ProvidedProperty    as p ->
-                            if not p.BelongsToTargetModel then
-                                if p.CanRead then members.Add (p.GetGetMethod true)
-                                if p.CanWrite then members.Add (p.GetSetMethod true)
-                        | :? ProvidedEvent       as e ->
-                            if not e.BelongsToTargetModel then
-                                members.Add (e.GetAddMethod true)
-                                members.Add (e.GetRemoveMethod true)
-                        | _ -> ()
+and ProvidedEvent(isTgt: bool, eventName:string, attrs: EventAttributes, eventHandlerType:Type, isStatic: bool, adder: (unit -> MethodInfo), remover: (unit -> MethodInfo), customAttributesData) =
+    inherit EventInfo()
 
-        let getMembers() =
-            evalMembers()
-            members.ToArray()
+    let mutable declaringType : ProvidedTypeDefinition option = None
 
-        // Save some common lookups for provided types with lots of members
-        let mutable bindings :  Dictionary<int32, obj> = null
+    let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
 
-        let save (key: BindingFlags) f : 'T =
-            let key = int key
+    new (eventName, eventHandlerType, adderCode, removerCode, ?isStatic) =
+        let isStatic = defaultArg isStatic false
+        let pattrs = (if isStatic then MethodAttributes.Static else enum<MethodAttributes>(0)) ||| MethodAttributes.Public ||| MethodAttributes.SpecialName
+        let adder = ProvidedMethod(false, "add_" + eventName, pattrs, [| ProvidedParameter(false, "handler", eventHandlerType, isOut=Some false, optionalValue=None) |], typeof<Void>, Some adderCode, [], None, K [| |])  :> MethodInfo
+        let remover = ProvidedMethod(false, "remove_" + eventName, pattrs, [| ProvidedParameter(false, "handler", eventHandlerType, isOut=Some false, optionalValue=None) |], typeof<Void>, Some removerCode, [], None, K [| |])  :> MethodInfo
+        ProvidedEvent(false, eventName, EventAttributes.None, eventHandlerType, isStatic, K adder, K remover, K [| |])
 
-            if bindings = null then
-                bindings <- Dictionary<_,_>(HashIdentity.Structural)
+    member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
+    member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
+    member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
+    member __.AddDefinitionLocation(line, column, filePath) = customAttributesImpl.AddDefinitionLocation(line, column, filePath)
 
-            if not (moreMembers()) && bindings.ContainsKey(key)  then
-                bindings.[key] :?> 'T
+    member __.PatchDeclaringType x =
+        if not isTgt then
+            match adder() with :? ProvidedMethod as a -> a.PatchDeclaringType x | _ -> ()
+            match remover() with :? ProvidedMethod as r -> r.PatchDeclaringType x | _ -> ()
+        patchOption declaringType (fun () -> declaringType <- Some x)
+
+    member __.IsStatic = isStatic
+    member __.Adder = adder()
+    member __.Remover = remover()
+    member __.BelongsToTargetModel = isTgt
+
+    override __.EventHandlerType = eventHandlerType
+    override __.GetAddMethod _nonPublic = adder()
+    override __.GetRemoveMethod _nonPublic = remover()
+    override __.Attributes = attrs
+    override __.Name = eventName
+    override __.DeclaringType = declaringType |> nonNone "DeclaringType":> Type
+    override __.MemberType: MemberTypes = MemberTypes.Event
+
+    override this.GetRaiseMethod _nonPublic = notRequired this "GetRaiseMethod" eventName
+    override this.ReflectedType = notRequired this "ReflectedType" eventName
+    override __.GetCustomAttributes(_inherit) = emptyAttributes
+    override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
+    override this.IsDefined(_attributeType, _inherit) = notRequired this "IsDefined" eventName
+    override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
+
+and ProvidedField(isTgt: bool, fieldName:string, attrs, fieldType:Type, rawConstantValue: obj, customAttributesData) =
+    inherit FieldInfo()
+
+    let mutable declaringType : ProvidedTypeDefinition option = None
+
+    let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
+    let mutable attrs = attrs
+
+    new (fieldName:string, fieldType:Type) = ProvidedField(false, fieldName, FieldAttributes.Private, fieldType, null, (K [| |]))
+
+    member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
+    member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
+    member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
+    member __.AddObsoleteAttribute (message, ?isError) = customAttributesImpl.AddObsolete (message, defaultArg isError false)
+    member __.AddDefinitionLocation(line, column, filePath) = customAttributesImpl.AddDefinitionLocation(line, column, filePath)
+    member __.SetFieldAttributes attributes = attrs <- attributes
+    member __.BelongsToTargetModel = isTgt
+
+    member __.PatchDeclaringType x = patchOption declaringType (fun () -> declaringType <- Some x)
+
+    member __.AddCustomAttribute attribute = customAttributesImpl.AddCustomAttribute attribute
+    override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
+
+    // Implement overloads
+    override __.FieldType = fieldType
+    override __.GetRawConstantValue() = rawConstantValue
+    override __.Attributes = attrs
+    override __.Name = fieldName
+    override __.DeclaringType = declaringType |> nonNone "DeclaringType":> Type
+    override __.MemberType: MemberTypes = MemberTypes.Field
+
+    override this.ReflectedType = notRequired this "ReflectedType" fieldName
+    override __.GetCustomAttributes(_inherit) = emptyAttributes
+    override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
+    override this.IsDefined(_attributeType, _inherit) = notRequired this "IsDefined" fieldName
+
+    override this.SetValue(_obj, _value, _invokeAttr, _binder, _culture) = notRequired this "SetValue" fieldName
+    override this.GetValue(_obj): obj = notRequired this "GetValue" fieldName
+    override this.FieldHandle = notRequired this "FieldHandle" fieldName
+
+    static member Literal(fieldName:string, fieldType:Type, literalValue: obj) =
+        ProvidedField(false, fieldName, (FieldAttributes.Static ||| FieldAttributes.Literal ||| FieldAttributes.Public), fieldType, literalValue, K [| |])
+
+
+and ProvidedMeasureBuilder() =
+
+    // TODO: this shouldn't be hardcoded, but without creating a dependency on FSharp.Compiler.Service
+    // there seems to be no way to check if a type abbreviation exists
+    static let unitNamesTypeAbbreviations =
+        [
+            "meter"; "hertz"; "newton"; "pascal"; "joule"; "watt"; "coulomb";
+            "volt"; "farad"; "ohm"; "siemens"; "weber"; "tesla"; "henry"
+            "lumen"; "lux"; "becquerel"; "gray"; "sievert"; "katal"
+        ]
+        |> Set.ofList
+
+    static let unitSymbolsTypeAbbreviations =
+        [
+            "m"; "kg"; "s"; "A"; "K"; "mol"; "cd"; "Hz"; "N"; "Pa"; "J"; "W"; "C"
+            "V"; "F"; "S"; "Wb"; "T"; "lm"; "lx"; "Bq"; "Gy"; "Sv"; "kat"; "H"
+        ]
+        |> Set.ofList
+
+    static member One = typeof<CompilerServices.MeasureOne>
+    static member Product (measure1, measure2) = typedefof<CompilerServices.MeasureProduct<_, _>>.MakeGenericType [| measure1;measure2 |]
+    static member Inverse denominator = typedefof<CompilerServices.MeasureInverse<_>>.MakeGenericType [| denominator |]
+    static member Ratio (numerator, denominator) = ProvidedMeasureBuilder.Product(numerator, ProvidedMeasureBuilder.Inverse denominator)
+    static member Square measure = ProvidedMeasureBuilder.Product(measure, measure)
+
+    // If the unit is not a valid type, instead
+    // of assuming it's a type abbreviation, which may not be the case and cause a
+    // problem later on, check the list of valid abbreviations
+    static member SI (unitName:string) =
+        let mLowerCase = unitName.ToLowerInvariant()
+        let abbreviation =
+            if unitNamesTypeAbbreviations.Contains mLowerCase then
+                Some ("Microsoft.FSharp.Data.UnitSystems.SI.UnitNames", mLowerCase)
+            elif unitSymbolsTypeAbbreviations.Contains unitName then
+                Some ("Microsoft.FSharp.Data.UnitSystems.SI.UnitSymbols", unitName)
             else
-                let res = f () // this will refresh the members
-                bindings.[key] <- box res
-                res
+                None
+        match abbreviation with
+        | Some (ns, unitName) ->
+            ProvidedTypeSymbol(ProvidedTypeSymbolKind.FSharpTypeAbbreviation(typeof<Core.CompilerServices.MeasureOne>.Assembly, ns, [| unitName |]), [], defaultTypeBuilder) :> Type
+        | None ->
+            typedefof<list<int>>.Assembly.GetType("Microsoft.FSharp.Data.UnitSystems.SI.UnitNames." + mLowerCase)
 
-        let evalInterfaces() =
-            if interfacesQueue.Count > 0 then
-                let elems = interfacesQueue |> Seq.toArray // take a copy in case more elements get added
-                interfacesQueue.Clear()
-                for  f in elems do
-                    for i in f() do
-                        interfaceImpls.Add i
-                match backingDataSource with
-                | None -> ()
-                | Some (_, _getFreshMembers, getInterfaces, _getFreshMethodOverrides) ->
-                    interfacesQueue.Add getInterfaces
+    static member AnnotateType (basic, argument) = ProvidedTypeSymbol(Generic basic, argument, defaultTypeBuilder) :> Type
 
-        let getInterfaces() =
-            evalInterfaces()
-            interfaceImpls.ToArray()
+and
+    [<RequireQualifiedAccess; NoComparison>]
+    TypeContainer =
+    | Namespace of (unit -> Assembly) * string // namespace
+    | Type of ProvidedTypeDefinition
+    | TypeToBeDecided
 
-        let evalMethodOverrides () =
-            if methodOverridesQueue.Count > 0 then
-                let elems = methodOverridesQueue |> Seq.toArray // take a copy in case more elements get added
-                methodOverridesQueue.Clear()
-                for  f in elems do
-                    for i in f() do
-                        methodOverrides.Add i
-                match backingDataSource with
-                | None -> ()
-                | Some (_, _getFreshMembers, _getFreshInterfaces, getFreshMethodOverrides) ->
-                    methodOverridesQueue.Add getFreshMethodOverrides
+/// backingDataSource is a set of functions to fetch backing data for the ProvidedTypeDefinition,
+/// and allows us to reuse this type for both target and source models, even when the
+/// source model is being incrementally updates by further .AddMember calls
+and ProvidedTypeDefinition(isTgt: bool, container:TypeContainer, className: string, getBaseType: (unit -> Type option), attrs: TypeAttributes, getEnumUnderlyingType, staticParams, staticParamsApply, backingDataSource, customAttributesData, nonNullable, hideObjectMethods, typeBuilder: ITypeBuilder) as this =
+    inherit TypeDelegator()
 
-        let getFreshMethodOverrides () =
-            evalMethodOverrides ()
-            methodOverrides.ToArray()
+    do match container, !ProvidedTypeDefinition.Logger with
+        | TypeContainer.Namespace _, Some logger when not isTgt -> logger (sprintf "Creating ProvidedTypeDefinition %s [%d]" className (System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode this))
+        | _ -> ()
 
-        let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
+    static let defaultAttributes (isErased, isSealed, isInterface, isAbstract) =
+        TypeAttributes.Public |||
+        (if isInterface then TypeAttributes.Interface ||| TypeAttributes.Abstract
+            elif isAbstract then TypeAttributes.Abstract
+            else TypeAttributes.Class) |||
+        (if isSealed && not isInterface && not isAbstract then TypeAttributes.Sealed else enum 0) |||
+        enum (if isErased then int32 TypeProviderTypeAttributes.IsErased else 0)
 
-        do if nonNullable then customAttributesImpl.NonNullable <- true
-        do if hideObjectMethods then customAttributesImpl.HideObjectMethods <- true
-        do this.typeImpl <- this
+    // state
+    let mutable attrs   = attrs
+    let mutable enumUnderlyingType = lazy getEnumUnderlyingType()
+    let mutable baseType =  lazy getBaseType()
 
-        override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
+    /// Represents the evaluated members so far
+    let members = ResizeArray<MemberInfo>()
 
-        new (assembly:Assembly, namespaceName, className, baseType, ?hideObjectMethods, ?nonNullable, ?isErased, ?isSealed, ?isInterface) =
-            let isErased = defaultArg isErased true
-            let isSealed = defaultArg isSealed true
-            let isInterface = defaultArg isInterface false
-            let nonNullable = defaultArg nonNullable false
-            let hideObjectMethods = defaultArg hideObjectMethods false
-            let attrs = defaultAttributes (isErased, isSealed, isInterface)
-            //if not isErased && assembly.GetType().Name <> "ProvidedAssembly" then failwithf "a non-erased (i.e. generative) ProvidedTypeDefinition '%s.%s' was placed in an assembly '%s' that is not a ProvidedAssembly" namespaceName className (assembly.GetName().Name)
-            ProvidedTypeDefinition(false, TypeContainer.Namespace (K assembly,namespaceName), className, K baseType, attrs, K None, [], None, None, K [| |], nonNullable, hideObjectMethods)
+    /// Represents delayed members, as yet uncomputed
+    let membersQueue = ResizeArray<(unit -> MemberInfo[])>()
 
-        new (className:string, baseType, ?hideObjectMethods, ?nonNullable, ?isErased, ?isSealed, ?isInterface) =
-            let isErased = defaultArg isErased true
-            let isSealed = defaultArg isSealed true
-            let isInterface = defaultArg isInterface false
-            let nonNullable = defaultArg nonNullable false
-            let hideObjectMethods = defaultArg hideObjectMethods false
-            let attrs = defaultAttributes (isErased, isSealed, isInterface)
-            ProvidedTypeDefinition(false, TypeContainer.TypeToBeDecided, className, K baseType, attrs, K None, [], None, None, K [| |], nonNullable, hideObjectMethods)
+    let mutable staticParamsDefined = false
+    let mutable staticParams = staticParams
+    let mutable staticParamsApply = staticParamsApply
+    let mutable container = container
+    let interfaceImpls = ResizeArray<Type>()
+    let interfacesQueue = ResizeArray<unit -> Type[]>()
+    let methodOverrides = ResizeArray<ProvidedMethod * MethodInfo>()
+    let methodOverridesQueue = ResizeArray<unit -> (ProvidedMethod * MethodInfo)[]>()
 
-        // state ops
+    do match backingDataSource with
+        | None -> ()
+        | Some (_, getFreshMembers, getFreshInterfaces, getFreshMethodOverrides) ->
+            membersQueue.Add getFreshMembers
+            interfacesQueue.Add getFreshInterfaces
+            methodOverridesQueue.Add getFreshMethodOverrides
 
-        override __.UnderlyingSystemType = typeof<Type>
+    let checkFreshMembers() =
+        match backingDataSource with
+        | None -> false
+        | Some (checkFreshMembers, _getFreshMembers, _getFreshInterfaces, _getFreshMethodOverrides) -> checkFreshMembers()
 
-        // Implement overloads
-        override __.Assembly =
-            match container with
-            | TypeContainer.Namespace (theAssembly,_) -> theAssembly()
-            | TypeContainer.Type t           -> t.Assembly
-            | TypeContainer.TypeToBeDecided -> failwithf "type '%s' was not yet added as a member to a declaring type, stacktrace = %s" className Environment.StackTrace
+    let moreMembers() =
+        membersQueue.Count > 0 || checkFreshMembers()
 
-        override __.FullName =
-            match container with
-            | TypeContainer.Type declaringType -> declaringType.FullName + "+" + className
-            | TypeContainer.Namespace (_,namespaceName) ->
-                if namespaceName="" then failwith "use null for global namespace"
-                match namespaceName with
-                | null -> className
-                | _    -> namespaceName + "." + className
-            | TypeContainer.TypeToBeDecided -> failwithf "type '%s' was not added as a member to a declaring type" className
+    let evalMembers() =
+        if moreMembers() then
+            // re-add the getFreshMembers call from the backingDataSource to make sure we fetch the latest translated members from the source model
+            match backingDataSource with
+            | None -> ()
+            | Some (_, getFreshMembers, _getFreshInterfaces, _getFreshMethodOverrides) ->
+                membersQueue.Add getFreshMembers
 
-        override __.Namespace =
-            match container with
-            | TypeContainer.Namespace (_,nsp) -> nsp
-            | TypeContainer.Type t           -> t.Namespace
-            | TypeContainer.TypeToBeDecided -> failwithf "type '%s' was not added as a member to a declaring type" className
+            let elems = membersQueue |> Seq.toArray // take a copy in case more elements get added
+            membersQueue.Clear()
+            for  f in elems do
+                for m in f() do
+                    members.Add m
 
-        override __.BaseType = match baseType.Value with Some ty -> ty | None -> null
+                    // Implicitly add the property and event methods (only for the source model where they are not explicitly declared)
+                    match m with
+                    | :? ProvidedProperty    as p ->
+                        if not p.BelongsToTargetModel then
+                            if p.CanRead then members.Add (p.GetGetMethod true)
+                            if p.CanWrite then members.Add (p.GetSetMethod true)
+                    | :? ProvidedEvent       as e ->
+                        if not e.BelongsToTargetModel then
+                            members.Add (e.GetAddMethod true)
+                            members.Add (e.GetRemoveMethod true)
+                    | _ -> ()
 
-        override __.GetConstructors bindingFlags =
-            (//save ("ctor", bindingFlags, None) (fun () ->
+    let getMembers() =
+        evalMembers()
+        members.ToArray()
+
+    // Save some common lookups for provided types with lots of members
+    let mutable bindings :  Dictionary<int32, obj> = null
+
+    let save (key: BindingFlags) f : 'T =
+        let key = int key
+
+        if bindings = null then
+            bindings <- Dictionary<_, _>(HashIdentity.Structural)
+
+        if not (moreMembers()) && bindings.ContainsKey(key)  then
+            bindings.[key] :?> 'T
+        else
+            let res = f () // this will refresh the members
+            bindings.[key] <- box res
+            res
+
+    let evalInterfaces() =
+        if interfacesQueue.Count > 0 then
+            let elems = interfacesQueue |> Seq.toArray // take a copy in case more elements get added
+            interfacesQueue.Clear()
+            for  f in elems do
+                for i in f() do
+                    interfaceImpls.Add i
+            match backingDataSource with
+            | None -> ()
+            | Some (_, _getFreshMembers, getInterfaces, _getFreshMethodOverrides) ->
+                interfacesQueue.Add getInterfaces
+
+    let getInterfaces() =
+        evalInterfaces()
+        interfaceImpls.ToArray()
+
+    let evalMethodOverrides () =
+        if methodOverridesQueue.Count > 0 then
+            let elems = methodOverridesQueue |> Seq.toArray // take a copy in case more elements get added
+            methodOverridesQueue.Clear()
+            for  f in elems do
+                for i in f() do
+                    methodOverrides.Add i
+            match backingDataSource with
+            | None -> ()
+            | Some (_, _getFreshMembers, _getFreshInterfaces, getFreshMethodOverrides) ->
+                methodOverridesQueue.Add getFreshMethodOverrides
+
+    let getFreshMethodOverrides () =
+        evalMethodOverrides ()
+        methodOverrides.ToArray()
+
+    let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
+
+    do if nonNullable then customAttributesImpl.NonNullable <- true
+    do if hideObjectMethods then customAttributesImpl.HideObjectMethods <- true
+    do this.typeImpl <- this
+
+    override __.GetCustomAttributesData() = customAttributesImpl.GetCustomAttributesData()
+
+    new (assembly:Assembly, namespaceName, className, baseType, ?hideObjectMethods, ?nonNullable, ?isErased, ?isSealed, ?isInterface, ?isAbstract) =
+        let isErased = defaultArg isErased true
+        let isSealed = defaultArg isSealed true
+        let isInterface = defaultArg isInterface false
+        let isAbstract = defaultArg isAbstract false
+        let nonNullable = defaultArg nonNullable false
+        let hideObjectMethods = defaultArg hideObjectMethods false
+        let attrs = defaultAttributes (isErased, isSealed, isInterface, isAbstract)
+        //if not isErased && assembly.GetType().Name <> "ProvidedAssembly" then failwithf "a non-erased (i.e. generative) ProvidedTypeDefinition '%s.%s' was placed in an assembly '%s' that is not a ProvidedAssembly" namespaceName className (assembly.GetName().Name)
+        ProvidedTypeDefinition(false, TypeContainer.Namespace (K assembly, namespaceName), className, K baseType, attrs, K None, [], None, None, K [| |], nonNullable, hideObjectMethods, defaultTypeBuilder)
+
+    new (className:string, baseType, ?hideObjectMethods, ?nonNullable, ?isErased, ?isSealed, ?isInterface, ?isAbstract) =
+        let isErased = defaultArg isErased true
+        let isSealed = defaultArg isSealed true
+        let isInterface = defaultArg isInterface false
+        let isAbstract = defaultArg isAbstract false
+        let nonNullable = defaultArg nonNullable false
+        let hideObjectMethods = defaultArg hideObjectMethods false
+        let attrs = defaultAttributes (isErased, isSealed, isInterface, isAbstract)
+        ProvidedTypeDefinition(false, TypeContainer.TypeToBeDecided, className, K baseType, attrs, K None, [], None, None, K [| |], nonNullable, hideObjectMethods, defaultTypeBuilder)
+
+    // state ops
+
+    override __.UnderlyingSystemType = typeof<Type>
+
+    // Implement overloads
+    override __.Assembly =
+        match container with
+        | TypeContainer.Namespace (theAssembly, _) -> theAssembly()
+        | TypeContainer.Type t           -> t.Assembly
+        | TypeContainer.TypeToBeDecided -> failwithf "type '%s' was not yet added as a member to a declaring type, stacktrace = %s" className Environment.StackTrace
+
+    override __.FullName =
+        match container with
+        | TypeContainer.Type declaringType -> declaringType.FullName + "+" + className
+        | TypeContainer.Namespace (_, namespaceName) ->
+            if namespaceName="" then failwith "use null for global namespace"
+            match namespaceName with
+            | null -> className
+            | _    -> namespaceName + "." + className
+        | TypeContainer.TypeToBeDecided -> failwithf "type '%s' was not added as a member to a declaring type" className
+
+    override __.Namespace =
+        match container with
+        | TypeContainer.Namespace (_, nsp) -> nsp
+        | TypeContainer.Type t           -> t.Namespace
+        | TypeContainer.TypeToBeDecided -> failwithf "type '%s' was not added as a member to a declaring type" className
+
+    override __.BaseType = match baseType.Value with Some ty -> ty | None -> null
+
+    override __.GetConstructors bindingFlags =
+        (//save ("ctor", bindingFlags, None) (fun () ->
+            getMembers()
+            |> Array.choose (function :? ConstructorInfo as c when memberBinds false bindingFlags c.IsStatic c.IsPublic -> Some c | _ -> None))
+
+    override this.GetMethods bindingFlags =
+        (//save ("methods", bindingFlags, None) (fun () ->
+            getMembers()
+            |> Array.choose (function :? MethodInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> Some m | _ -> None)
+            |> (if hasFlag bindingFlags BindingFlags.DeclaredOnly || this.BaseType = null then id else (fun mems -> Array.append mems (this.ErasedBaseType.GetMethods(bindingFlags)))))
+
+    override this.GetFields bindingFlags =
+        (//save ("fields", bindingFlags, None) (fun () ->
+            getMembers()
+            |> Array.choose (function :? FieldInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> Some m | _ -> None)
+            |> (if hasFlag bindingFlags BindingFlags.DeclaredOnly || this.BaseType = null then id else (fun mems -> Array.append mems (this.ErasedBaseType.GetFields(bindingFlags)))))
+
+    override this.GetProperties bindingFlags =
+        (//save ("props", bindingFlags, None) (fun () ->
+            let staticOrPublic =
                 getMembers()
-                |> Array.choose (function :? ConstructorInfo as c when memberBinds false bindingFlags c.IsStatic c.IsPublic -> Some c | _ -> None))
+                |> Array.choose (function :? PropertyInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> Some m | _ -> None)
+            staticOrPublic
+            |> (if hasFlag bindingFlags BindingFlags.DeclaredOnly || this.BaseType = null
+                then id
+                else (fun mems -> Array.append mems (this.ErasedBaseType.GetProperties(bindingFlags)))))
 
-        override this.GetMethods bindingFlags =
-            (//save ("methods", bindingFlags, None) (fun () ->
-                getMembers()
-                |> Array.choose (function :? MethodInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> Some m | _ -> None)
-                |> (if hasFlag bindingFlags BindingFlags.DeclaredOnly || this.BaseType = null then id else (fun mems -> Array.append mems (this.ErasedBaseType.GetMethods(bindingFlags)))))
+    override this.GetEvents bindingFlags =
+        (//save ("events", bindingFlags, None) (fun () ->
+            getMembers()
+            |> Array.choose (function :? EventInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> Some m | _ -> None)
+            |> (if hasFlag bindingFlags BindingFlags.DeclaredOnly || this.BaseType = null then id else (fun mems -> Array.append mems (this.ErasedBaseType.GetEvents(bindingFlags)))))
 
-        override this.GetFields bindingFlags =
-            (//save ("fields", bindingFlags, None) (fun () ->
-                getMembers()
-                |> Array.choose (function :? FieldInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> Some m | _ -> None)
-                |> (if hasFlag bindingFlags BindingFlags.DeclaredOnly || this.BaseType = null then id else (fun mems -> Array.append mems (this.ErasedBaseType.GetFields(bindingFlags)))))
+    override __.GetNestedTypes bindingFlags =
+        (//save ("nested", bindingFlags, None) (fun () ->
+            getMembers()
+            |> Array.choose (function :? Type as m when memberBinds true bindingFlags false m.IsPublic || m.IsNestedPublic -> Some m | _ -> None)
+            |> (if hasFlag bindingFlags BindingFlags.DeclaredOnly || this.BaseType = null then id else (fun mems -> Array.append mems (this.ErasedBaseType.GetNestedTypes(bindingFlags)))))
 
-        override this.GetProperties bindingFlags =
-            (//save ("props", bindingFlags, None) (fun () ->
-                let staticOrPublic =
-                    getMembers()
-                    |> Array.choose (function :? PropertyInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> Some m | _ -> None)
-                staticOrPublic
-                |> (if hasFlag bindingFlags BindingFlags.DeclaredOnly || this.BaseType = null
-                    then id
-                    else (fun mems -> Array.append mems (this.ErasedBaseType.GetProperties(bindingFlags)))))
+    override this.GetConstructorImpl(bindingFlags, _binder, _callConventions, _types, _modifiers) =
+        let xs = this.GetConstructors bindingFlags |> Array.filter (fun m -> m.Name = ".ctor")
+        if xs.Length > 1 then failwith "GetConstructorImpl. not support overloads"
+        if xs.Length > 0 then xs.[0] else null
 
-        override this.GetEvents bindingFlags =
-            (//save ("events", bindingFlags, None) (fun () ->
-                getMembers()
-                |> Array.choose (function :? EventInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> Some m | _ -> None)
-                |> (if hasFlag bindingFlags BindingFlags.DeclaredOnly || this.BaseType = null then id else (fun mems -> Array.append mems (this.ErasedBaseType.GetEvents(bindingFlags)))))
+    override __.GetMethodImpl(name, bindingFlags, _binderBinder, _callConvention, _types, _modifiers): MethodInfo =
+        (//save ("methimpl", bindingFlags, Some name) (fun () ->
+            // This is performance critical for large spaces of provided methods and properties
+            // Save a table of the methods grouped by name
+            let table =
+                save (bindingFlags ||| BindingFlags.InvokeMethod) (fun () ->
+                    let methods = this.GetMethods bindingFlags
+                    methods |> Seq.groupBy (fun m -> m.Name) |> Seq.map (fun (k, v) -> k, Seq.toArray v) |> dict)
 
-        override __.GetNestedTypes bindingFlags =
-            (//save ("nested", bindingFlags, None) (fun () ->
-                getMembers()
-                |> Array.choose (function :? Type as m when memberBinds true bindingFlags false m.IsPublic || m.IsNestedPublic -> Some m | _ -> None)
-                |> (if hasFlag bindingFlags BindingFlags.DeclaredOnly || this.BaseType = null then id else (fun mems -> Array.append mems (this.ErasedBaseType.GetNestedTypes(bindingFlags)))))
+            let xs = if table.ContainsKey name then table.[name] else [| |]
+            //let xs = this.GetMethods bindingFlags |> Array.filter (fun m -> m.Name = name)
+            if xs.Length > 1 then failwithf "GetMethodImpl. not support overloads, name = '%s', methods - '%A', callstack = '%A'" name xs Environment.StackTrace
+            if xs.Length > 0 then xs.[0] else null)
 
-        override this.GetConstructorImpl(bindingFlags, _binder, _callConventions, _types, _modifiers) =
-            let xs = this.GetConstructors bindingFlags |> Array.filter (fun m -> m.Name = ".ctor")
-            if xs.Length > 1 then failwith "GetConstructorImpl. not support overloads"
-            if xs.Length > 0 then xs.[0] else null
+    override this.GetField(name, bindingFlags) =
+        (//save ("field1", bindingFlags, Some name) (fun () ->
+            let xs = this.GetFields bindingFlags |> Array.filter (fun m -> m.Name = name)
+            if xs.Length > 0 then xs.[0] else null)
 
-        override __.GetMethodImpl(name, bindingFlags, _binderBinder, _callConvention, _types, _modifiers): MethodInfo =
-            (//save ("methimpl", bindingFlags, Some name) (fun () ->
-                // This is performance critical for large spaces of provided methods and properties
-                // Save a table of the methods grouped by name
-                let table =
-                    save (bindingFlags ||| BindingFlags.InvokeMethod) (fun () ->
-                        let methods = this.GetMethods bindingFlags
-                        methods |> Seq.groupBy (fun m -> m.Name) |> Seq.map (fun (k,v) -> k, Seq.toArray v) |> dict)
+    override __.GetPropertyImpl(name, bindingFlags, _binder, _returnType, _types, _modifiers) =
+        (//save ("prop1", bindingFlags, Some name) (fun () ->
+            let table =
+                save (bindingFlags ||| BindingFlags.GetProperty) (fun () ->
+                    let methods = this.GetProperties bindingFlags
+                    methods |> Seq.groupBy (fun m -> m.Name) |> Seq.map (fun (k, v) -> k, Seq.toArray v) |> dict)
+            let xs = if table.ContainsKey name then table.[name] else [| |]
+            //let xs = this.GetProperties bindingFlags |> Array.filter (fun m -> m.Name = name)
+            if xs.Length > 0 then xs.[0] else null)
 
-                let xs = if table.ContainsKey name then table.[name] else [| |]
-                //let xs = this.GetMethods bindingFlags |> Array.filter (fun m -> m.Name = name)
-                if xs.Length > 1 then failwithf "GetMethodImpl. not support overloads, name = '%s', methods - '%A', callstack = '%A'" name xs Environment.StackTrace
-                if xs.Length > 0 then xs.[0] else null)
+    override __.GetEvent(name, bindingFlags) =
+        (//save ("event1", bindingFlags, Some name) (fun () ->
+            let xs = this.GetEvents bindingFlags |> Array.filter (fun m -> m.Name = name)
+            if xs.Length > 0 then xs.[0] else null)
 
-        override this.GetField(name, bindingFlags) =
-            (//save ("field1", bindingFlags, Some name) (fun () ->
-                let xs = this.GetFields bindingFlags |> Array.filter (fun m -> m.Name = name)
-                if xs.Length > 0 then xs.[0] else null)
+    override __.GetNestedType(name, bindingFlags) =
+        (//save ("nested1", bindingFlags, Some name) (fun () ->
+            let xs = this.GetNestedTypes bindingFlags |> Array.filter (fun m -> m.Name = name)
+            if xs.Length > 0 then xs.[0] else null)
 
-        override __.GetPropertyImpl(name, bindingFlags, _binder, _returnType, _types, _modifiers) =
-            (//save ("prop1", bindingFlags, Some name) (fun () ->
-                let table =
-                    save (bindingFlags ||| BindingFlags.GetProperty) (fun () ->
-                        let methods = this.GetProperties bindingFlags
-                        methods |> Seq.groupBy (fun m -> m.Name) |> Seq.map (fun (k,v) -> k, Seq.toArray v) |> dict)
-                let xs = if table.ContainsKey name then table.[name] else [| |]
-                //let xs = this.GetProperties bindingFlags |> Array.filter (fun m -> m.Name = name)
-                if xs.Length > 0 then xs.[0] else null)
+    override __.GetInterface(_name, _ignoreCase) = notRequired this "GetInterface" this.Name
 
-        override __.GetEvent(name, bindingFlags) =
-            (//save ("event1", bindingFlags, Some name) (fun () ->
-                let xs = this.GetEvents bindingFlags |> Array.filter (fun m -> m.Name = name)
-                if xs.Length > 0 then xs.[0] else null)
-
-        override __.GetNestedType(name, bindingFlags) =
-            (//save ("nested1", bindingFlags, Some name) (fun () ->
-                let xs = this.GetNestedTypes bindingFlags |> Array.filter (fun m -> m.Name = name)
-                if xs.Length > 0 then xs.[0] else null)
-
-        override __.GetInterface(_name, _ignoreCase) = notRequired this "GetInterface" this.Name
-
-        override __.GetInterfaces() = getInterfaces()
+    override __.GetInterfaces() = getInterfaces()
 
 
-        override __.MakeArrayType() = ProvidedTypeSymbol(ProvidedTypeSymbolKind.SDArray, [this]) :> Type
+    override __.MakeArrayType() = ProvidedTypeSymbol(ProvidedTypeSymbolKind.SDArray, [this], typeBuilder) :> Type
 
-        override __.MakeArrayType arg = ProvidedTypeSymbol(ProvidedTypeSymbolKind.Array arg, [this]) :> Type
+    override __.MakeArrayType arg = ProvidedTypeSymbol(ProvidedTypeSymbolKind.Array arg, [this], typeBuilder) :> Type
 
-        override __.MakePointerType() = ProvidedTypeSymbol(ProvidedTypeSymbolKind.Pointer, [this]) :> Type
+    override __.MakePointerType() = ProvidedTypeSymbol(ProvidedTypeSymbolKind.Pointer, [this], typeBuilder) :> Type
 
-        override __.MakeByRefType() = ProvidedTypeSymbol(ProvidedTypeSymbolKind.ByRef, [this]) :> Type
+    override __.MakeByRefType() = ProvidedTypeSymbol(ProvidedTypeSymbolKind.ByRef, [this], typeBuilder) :> Type
 
-        // The binding attributes are always set to DeclaredOnly ||| Static ||| Instance ||| Public when GetMembers is called directly by the F# compiler
-        // However, it's possible for the framework to generate other sets of flags in some corner cases (e.g. via use of `enum` with a provided type as the target)
-        override __.GetMembers bindingFlags =
-            [| for m in getMembers()  do
-                 match m with
-                 | :? ConstructorInfo as c when memberBinds false bindingFlags c.IsStatic c.IsPublic -> yield (c :> MemberInfo)
-                 | :? MethodInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> yield (m :> _)
-                 | :? FieldInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> yield (m :> _)
-                 | :? PropertyInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> yield (m :> _)
-                 | :? EventInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> yield (m :> _)
-                 | :? Type as m when memberBinds true bindingFlags false m.IsPublic || m.IsNestedPublic -> yield (m :> _)
-                 | _ -> () |]
+    // The binding attributes are always set to DeclaredOnly ||| Static ||| Instance ||| Public when GetMembers is called directly by the F# compiler
+    // However, it's possible for the framework to generate other sets of flags in some corner cases (e.g. via use of `enum` with a provided type as the target)
+    override __.GetMembers bindingFlags =
+        [| for m in getMembers()  do
+                match m with
+                | :? ConstructorInfo as c when memberBinds false bindingFlags c.IsStatic c.IsPublic -> yield (c :> MemberInfo)
+                | :? MethodInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> yield (m :> _)
+                | :? FieldInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> yield (m :> _)
+                | :? PropertyInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> yield (m :> _)
+                | :? EventInfo as m when memberBinds false bindingFlags m.IsStatic m.IsPublic -> yield (m :> _)
+                | :? Type as m when memberBinds true bindingFlags false m.IsPublic || m.IsNestedPublic -> yield (m :> _)
+                | _ -> () |]
 
-        override this.GetMember(name,mt,_bindingFlags) =
-            let mt = if hasFlag mt MemberTypes.NestedType then mt ||| MemberTypes.TypeInfo else mt
-            this.GetMembers() |> Array.filter (fun m -> 0 <> int(m.MemberType &&& mt) && m.Name = name)
+    override this.GetMember(name, mt, _bindingFlags) =
+        let mt = if hasFlag mt MemberTypes.NestedType then mt ||| MemberTypes.TypeInfo else mt
+        this.GetMembers() |> Array.filter (fun m -> 0 <> int(m.MemberType &&& mt) && m.Name = name)
 
-        // Attributes, etc..
-        override __.GetAttributeFlagsImpl() = adjustTypeAttributes this.IsNested attrs
+    // Attributes, etc..
+    override __.GetAttributeFlagsImpl() = adjustTypeAttributes this.IsNested attrs
 
-        override this.IsValueTypeImpl() =
-            match this.BaseType with
-            | null -> false
-            | bt -> bt.FullName = "System.Enum" || bt.FullName = "System.ValueType" || bt.IsValueType
+    override this.IsValueTypeImpl() =
+        match this.BaseType with
+        | null -> false
+        | bt -> bt.FullName = "System.Enum" || bt.FullName = "System.ValueType" || bt.IsValueType
 
-        override __.IsEnum =
-            match this.BaseType with
-            | null -> false
-            | bt -> bt.FullName = "System.Enum" || bt.IsEnum
+    override __.IsEnum =
+        match this.BaseType with
+        | null -> false
+        | bt -> bt.FullName = "System.Enum" || bt.IsEnum
 
-        override __.GetEnumUnderlyingType() =
-            if this.IsEnum then
-                match enumUnderlyingType.Force() with
-                | None -> typeof<int>
-                | Some ty -> ty
-            else failwithf "not enum type"
+    override __.GetEnumUnderlyingType() =
+        if this.IsEnum then
+            match enumUnderlyingType.Force() with
+            | None -> typeof<int>
+            | Some ty -> ty
+        else failwithf "not enum type"
 
-        override __.IsArrayImpl() = false
-        override __.IsByRefImpl() = false
-        override __.IsPointerImpl() = false
-        override __.IsPrimitiveImpl() = false
-        override __.IsCOMObjectImpl() = false
-        override __.HasElementTypeImpl() = false
-        override __.Name = className
+    override __.IsArrayImpl() = false
+    override __.IsByRefImpl() = false
+    override __.IsPointerImpl() = false
+    override __.IsPrimitiveImpl() = false
+    override __.IsCOMObjectImpl() = false
+    override __.HasElementTypeImpl() = false
+    override __.Name = className
 
-        override __.DeclaringType =
-            match container with
-            | TypeContainer.Namespace _ -> null
-            | TypeContainer.Type enclosingTyp -> (enclosingTyp :> Type)
-            | TypeContainer.TypeToBeDecided -> failwithf "type '%s' was not added as a member to a declaring type" className
+    override __.DeclaringType =
+        match container with
+        | TypeContainer.Namespace _ -> null
+        | TypeContainer.Type enclosingTyp -> (enclosingTyp :> Type)
+        | TypeContainer.TypeToBeDecided -> failwithf "type '%s' was not added as a member to a declaring type" className
 
-        override __.MemberType = if this.IsNested then MemberTypes.NestedType else MemberTypes.TypeInfo
+    override __.MemberType = if this.IsNested then MemberTypes.NestedType else MemberTypes.TypeInfo
 
 #if NETCOREAPP
-        // See bug https://github.com/fsprojects/FSharp.TypeProviders.SDK/issues/236
-        override __.IsSZArray = false
+    // See bug https://github.com/fsprojects/FSharp.TypeProviders.SDK/issues/236
+    override __.IsSZArray = false
 #endif
 
-        override x.GetHashCode() = x.Namespace.GetHashCode() ^^^ className.GetHashCode()
-        override this.Equals(that: obj) = Object.ReferenceEquals(this, that)
-        override this.Equals(that: Type) = Object.ReferenceEquals(this, that)
+    override x.GetHashCode() = x.Namespace.GetHashCode() ^^^ className.GetHashCode()
+    override this.Equals(that: obj) = Object.ReferenceEquals(this, that)
+    override this.Equals(that: Type) = Object.ReferenceEquals(this, that)
 
-        override this.IsAssignableFrom(otherTy: Type) = isAssignableFrom this otherTy
+    override this.IsAssignableFrom(otherTy: Type) = isAssignableFrom this otherTy
 
-        override this.IsSubclassOf(otherTy: Type) = isSubclassOf this otherTy
+    override this.IsSubclassOf(otherTy: Type) = isSubclassOf this otherTy
 
-        override __.GetGenericArguments() = [||]
+    override __.GetGenericArguments() = [||]
 
-        override __.ToString() = this.Name
+    override __.ToString() = this.Name
 
-        override x.Module = x.Assembly.ManifestModule
+    override x.Module = x.Assembly.ManifestModule
 
-        override __.GUID = Guid.Empty
-        override __.GetCustomAttributes(_inherit) = emptyAttributes
-        override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
-        override __.IsDefined(_attributeType: Type, _inherit) = false
+    override __.GUID = Guid.Empty
+    override __.GetCustomAttributes(_inherit) = emptyAttributes
+    override __.GetCustomAttributes(attributeType, _inherit) = Attributes.CreateEmpty attributeType
+    override __.IsDefined(_attributeType: Type, _inherit) = false
 
-        override __.GetElementType() = notRequired this "Module" this.Name
-        override __.InvokeMember(_name, _invokeAttr, _binder, _target, _args, _modifiers, _culture, _namedParameters) = notRequired this "Module" this.Name
-        override __.AssemblyQualifiedName = notRequired this "Module" this.Name
-        // Needed because TypeDelegator.cs provides a delegting implementation of this, and we are self-delegating
-        override this.GetEvents() = this.GetEvents(BindingFlags.Public ||| BindingFlags.Instance ||| BindingFlags.Static) // Needed because TypeDelegator.cs provides a delegting implementation of this, and we are self-delegating
+    override __.GetElementType() = notRequired this "Module" this.Name
+    override __.InvokeMember(_name, _invokeAttr, _binder, _target, _args, _modifiers, _culture, _namedParameters) = notRequired this "Module" this.Name
+    override __.AssemblyQualifiedName = notRequired this "Module" this.Name
+    // Needed because TypeDelegator.cs provides a delegting implementation of this, and we are self-delegating
+    override this.GetEvents() = this.GetEvents(BindingFlags.Public ||| BindingFlags.Instance ||| BindingFlags.Static) // Needed because TypeDelegator.cs provides a delegting implementation of this, and we are self-delegating
 
-        // Get the model
-        member __.BelongsToTargetModel = isTgt
-        member __.AttributesRaw = attrs
-        member __.EnumUnderlyingTypeRaw() = enumUnderlyingType.Force()
-        member __.Container = container
-        member __.BaseTypeRaw() = baseType.Force()
-        member __.StaticParams = staticParams
-        member __.StaticParamsApply = staticParamsApply
+    // Get the model
+    member __.BelongsToTargetModel = isTgt
+    member __.AttributesRaw = attrs
+    member __.EnumUnderlyingTypeRaw() = enumUnderlyingType.Force()
+    member __.Container = container
+    member __.BaseTypeRaw() = baseType.Force()
+    member __.StaticParams = staticParams
+    member __.StaticParamsApply = staticParamsApply
 
-        // Count the members declared since the indicated position in the members list.  This allows the target model to observe
-        // incremental additions made to the source model
-        member __.CountMembersFromCursor(idx: int) = evalMembers(); members.Count - idx
+    // Count the members declared since the indicated position in the members list.  This allows the target model to observe
+    // incremental additions made to the source model
+    member __.CountMembersFromCursor(idx: int) = evalMembers(); members.Count - idx
 
-        // Fetch the members declared since the indicated position in the members list.  This allows the target model to observe
-        // incremental additions made to the source model
-        member __.GetMembersFromCursor(idx: int) = evalMembers(); members.GetRange(idx, members.Count - idx).ToArray(), members.Count
+    // Fetch the members declared since the indicated position in the members list.  This allows the target model to observe
+    // incremental additions made to the source model
+    member __.GetMembersFromCursor(idx: int) = evalMembers(); members.GetRange(idx, members.Count - idx).ToArray(), members.Count
 
-        // Fetch the interfaces declared since the indicated position in the interfaces list
-        member __.GetInterfaceImplsFromCursor(idx: int) = evalInterfaces(); interfaceImpls.GetRange(idx, interfaceImpls.Count - idx).ToArray(), interfaceImpls.Count
+    // Fetch the interfaces declared since the indicated position in the interfaces list
+    member __.GetInterfaceImplsFromCursor(idx: int) = evalInterfaces(); interfaceImpls.GetRange(idx, interfaceImpls.Count - idx).ToArray(), interfaceImpls.Count
 
-        // Fetch the method overrides declared since the indicated position in the list
-        member __.GetMethodOverridesFromCursor(idx: int) = evalMethodOverrides(); methodOverrides.GetRange(idx, methodOverrides.Count - idx).ToArray(), methodOverrides.Count
+    // Fetch the method overrides declared since the indicated position in the list
+    member __.GetMethodOverridesFromCursor(idx: int) = evalMethodOverrides(); methodOverrides.GetRange(idx, methodOverrides.Count - idx).ToArray(), methodOverrides.Count
 
-        // Fetch the method overrides
-        member __.GetMethodOverrides() = getFreshMethodOverrides()
+    // Fetch the method overrides
+    member __.GetMethodOverrides() = getFreshMethodOverrides()
 
-        member this.ErasedBaseType : Type = ProvidedTypeDefinition.EraseType(this.BaseType)
+    member this.ErasedBaseType : Type = ProvidedTypeDefinition.EraseType(this.BaseType)
 
-        member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
-        member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
-        member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
-        member __.AddObsoleteAttribute (message,?isError) = customAttributesImpl.AddObsolete (message,defaultArg isError false)
-        member __.AddDefinitionLocation(line,column,filePath) = customAttributesImpl.AddDefinitionLocation(line, column, filePath)
-        member __.HideObjectMethods with get() = customAttributesImpl.HideObjectMethods and set v = customAttributesImpl.HideObjectMethods <- v
-        member __.NonNullable with get() = customAttributesImpl.NonNullable and set v = customAttributesImpl.NonNullable <- v
-        member __.AddCustomAttribute attribute = customAttributesImpl.AddCustomAttribute attribute
+    member __.AddXmlDocComputed xmlDocFunction = customAttributesImpl.AddXmlDocComputed xmlDocFunction
+    member __.AddXmlDocDelayed xmlDocFunction = customAttributesImpl.AddXmlDocDelayed xmlDocFunction
+    member __.AddXmlDoc xmlDoc = customAttributesImpl.AddXmlDoc xmlDoc
+    member __.AddObsoleteAttribute (message, ?isError) = customAttributesImpl.AddObsolete (message, defaultArg isError false)
+    member __.AddDefinitionLocation(line, column, filePath) = customAttributesImpl.AddDefinitionLocation(line, column, filePath)
+    member __.HideObjectMethods with get() = customAttributesImpl.HideObjectMethods and set v = customAttributesImpl.HideObjectMethods <- v
+    member __.NonNullable with get() = customAttributesImpl.NonNullable and set v = customAttributesImpl.NonNullable <- v
+    member __.AddCustomAttribute attribute = customAttributesImpl.AddCustomAttribute attribute
 
-        member __.SetEnumUnderlyingType(ty) = enumUnderlyingType <- lazy Some ty
-        member __.SetBaseType t =
-            if baseType.IsValueCreated then failwithf "The base type has already been evaluated for this type. Please call SetBaseType before any operations which traverse the type hierarchy. stacktrace = %A" Environment.StackTrace
-            baseType <- lazy Some t
-        member __.SetBaseTypeDelayed baseTypeFunction =
-            if baseType.IsValueCreated then failwithf "The base type has already been evaluated for this type. Please call SetBaseType before any operations which traverse the type hierarchy. stacktrace = %A" Environment.StackTrace
-            baseType <- lazy (Some (baseTypeFunction()))
-        member __.SetAttributes x = attrs <- x
+    member __.SetEnumUnderlyingType(ty) = enumUnderlyingType <- lazy Some ty
+    member __.SetBaseType t =
+        if baseType.IsValueCreated then failwithf "The base type has already been evaluated for this type. Please call SetBaseType before any operations which traverse the type hierarchy. stacktrace = %A" Environment.StackTrace
+        baseType <- lazy Some t
+    member __.SetBaseTypeDelayed baseTypeFunction =
+        if baseType.IsValueCreated then failwithf "The base type has already been evaluated for this type. Please call SetBaseType before any operations which traverse the type hierarchy. stacktrace = %A" Environment.StackTrace
+        baseType <- lazy (Some (baseTypeFunction()))
+    member __.AddAttributes x = attrs <- attrs ||| x
+    member __.SetAttributes x = attrs <- x
 
-        member this.AddMembers(memberInfos:list<#MemberInfo>) =
-            memberInfos |> List.iter this.PatchDeclaringTypeOfMember
-            membersQueue.Add (fun () -> memberInfos |> List.toArray |> Array.map (fun x -> x :> MemberInfo ))
+    member this.AddMembers(memberInfos:list<#MemberInfo>) =
+        memberInfos |> List.iter this.PatchDeclaringTypeOfMember
+        membersQueue.Add (fun () -> memberInfos |> List.toArray |> Array.map (fun x -> x :> MemberInfo ))
 
-        member __.AddMember(memberInfo:MemberInfo) =
-            this.AddMembers [memberInfo]
+    member __.AddMember(memberInfo:MemberInfo) =
+        this.AddMembers [memberInfo]
 
-        member __.AddMembersDelayed(membersFunction: unit -> list<#MemberInfo>) =
-            membersQueue.Add (fun () -> membersFunction() |> List.toArray |> Array.map (fun x -> this.PatchDeclaringTypeOfMember x; x :> MemberInfo ))
+    member __.AddMembersDelayed(membersFunction: unit -> list<#MemberInfo>) =
+        membersQueue.Add (fun () -> membersFunction() |> List.toArray |> Array.map (fun x -> this.PatchDeclaringTypeOfMember x; x :> MemberInfo ))
 
-        member __.AddMemberDelayed(memberFunction: unit -> #MemberInfo) =
-            this.AddMembersDelayed(fun () -> [memberFunction()])
+    member __.AddMemberDelayed(memberFunction: unit -> #MemberInfo) =
+        this.AddMembersDelayed(fun () -> [memberFunction()])
 
-        member __.AddAssemblyTypesAsNestedTypesDelayed (assemblyFunction: unit -> Assembly)  =
-            let bucketByPath nodef tipf (items: (string list * 'Value) list) =
-                // Find all the items with an empty key list and call 'tipf'
-                let tips =
-                    [ for (keylist,v) in items do
-                            match keylist with
-                            | [] -> yield tipf v
-                            | _ -> () ]
-
-                // Find all the items with a non-empty key list. Bucket them together by
-                // the first key. For each bucket, call 'nodef' on that head key and the bucket.
-                let nodes =
-                    let buckets = new Dictionary<_,_>(10)
-                    for (keylist,v) in items do
+    member __.AddAssemblyTypesAsNestedTypesDelayed (assemblyFunction: unit -> Assembly)  =
+        let bucketByPath nodef tipf (items: (string list * 'Value) list) =
+            // Find all the items with an empty key list and call 'tipf'
+            let tips =
+                [ for (keylist, v) in items do
                         match keylist with
-                        | [] -> ()
-                        | key::rest ->
-                            buckets.[key] <- (rest,v) :: (if buckets.ContainsKey key then buckets.[key] else []);
+                        | [] -> yield tipf v
+                        | _ -> () ]
 
-                    [ for (KeyValue(key,items)) in buckets -> nodef key items ]
+            // Find all the items with a non-empty key list. Bucket them together by
+            // the first key. For each bucket, call 'nodef' on that head key and the bucket.
+            let nodes =
+                let buckets = new Dictionary<_, _>(10)
+                for (keylist, v) in items do
+                    match keylist with
+                    | [] -> ()
+                    | key::rest ->
+                        buckets.[key] <- (rest, v) :: (if buckets.ContainsKey key then buckets.[key] else []);
 
-                tips @ nodes
-            this.AddMembersDelayed (fun _ ->
-                let topTypes = [ for ty in assemblyFunction().GetTypes() do
-                                        if not ty.IsNested then
-                                                let namespaceParts = match ty.Namespace with null -> [] | s -> s.Split '.' |> Array.toList
-                                                yield namespaceParts,  ty ]
-                let rec loop types =
-                    types
-                    |> bucketByPath
-                        (fun namespaceComponent typesUnderNamespaceComponent ->
-                            let t = ProvidedTypeDefinition(namespaceComponent, baseType = Some typeof<obj>)
-                            t.AddMembers (loop typesUnderNamespaceComponent)
-                            (t :> Type))
-                        id
-                loop topTypes)
+                [ for (KeyValue(key, items)) in buckets -> nodef key items ]
 
-        /// Abstract a type to a parametric-type. Requires "formal parameters" and "instantiation function".
-        member __.DefineStaticParameters(parameters: ProvidedStaticParameter list, instantiationFunction: (string -> obj[] -> ProvidedTypeDefinition)) =
-            if staticParamsDefined then failwithf "Static parameters have already been defined for this type. stacktrace = %A" Environment.StackTrace
-            staticParamsDefined <- true
-            staticParams      <- parameters
-            staticParamsApply <- Some instantiationFunction
+            tips @ nodes
+        this.AddMembersDelayed (fun _ ->
+            let topTypes = [ for ty in assemblyFunction().GetTypes() do
+                                    if not ty.IsNested then
+                                            let namespaceParts = match ty.Namespace with null -> [] | s -> s.Split '.' |> Array.toList
+                                            yield namespaceParts, ty ]
+            let rec loop types =
+                types
+                |> bucketByPath
+                    (fun namespaceComponent typesUnderNamespaceComponent ->
+                        let t = ProvidedTypeDefinition(namespaceComponent, baseType = Some typeof<obj>)
+                        t.AddMembers (loop typesUnderNamespaceComponent)
+                        (t :> Type))
+                    id
+            loop topTypes)
 
-        /// Get ParameterInfo[] for the parametric type parameters
-        member __.GetStaticParametersInternal() = [| for p in staticParams -> p :> ParameterInfo |]
+    /// Abstract a type to a parametric-type. Requires "formal parameters" and "instantiation function".
+    member __.DefineStaticParameters(parameters: ProvidedStaticParameter list, instantiationFunction: (string -> obj[] -> ProvidedTypeDefinition)) =
+        if staticParamsDefined then failwithf "Static parameters have already been defined for this type. stacktrace = %A" Environment.StackTrace
+        staticParamsDefined <- true
+        staticParams      <- parameters
+        staticParamsApply <- Some instantiationFunction
 
-        /// Instantiate parametric type
-        member this.ApplyStaticArguments(name:string, args:obj[]) =
-            if staticParams.Length <> args.Length then
-                failwithf "ProvidedTypeDefinition: expecting %d static parameters but given %d for type %s" staticParams.Length args.Length this.FullName
-            if staticParams.Length > 0 then
-                match staticParamsApply with
-                | None -> failwith "ProvidedTypeDefinition: DefineStaticParameters was not called"
-                | Some f -> f name args
-            else
-                this
+    /// Get ParameterInfo[] for the parametric type parameters
+    member __.GetStaticParametersInternal() = [| for p in staticParams -> p :> ParameterInfo |]
 
-        member __.PatchDeclaringType x = container <- TypeContainer.Type x
+    /// Instantiate parametric type
+    member this.ApplyStaticArguments(name:string, args:obj[]) =
+        if staticParams.Length <> args.Length then
+            failwithf "ProvidedTypeDefinition: expecting %d static parameters but given %d for type %s" staticParams.Length args.Length this.FullName
+        if staticParams.Length > 0 then
+            match staticParamsApply with
+            | None -> failwith "ProvidedTypeDefinition: DefineStaticParameters was not called"
+            | Some f -> f name args
+        else
+            this
 
-        member __.IsErased
-            with get() = (attrs &&& enum (int32 TypeProviderTypeAttributes.IsErased)) <> enum 0
-            and set v =
-               if v then attrs <- attrs ||| enum (int32 TypeProviderTypeAttributes.IsErased)
-               else attrs <- attrs &&& ~~~(enum (int32 TypeProviderTypeAttributes.IsErased))
+    member __.PatchDeclaringType x = container <- TypeContainer.Type x
 
-        member __.SuppressRelocation
-            with get() = (attrs &&& enum (int32 TypeProviderTypeAttributes.SuppressRelocate)) <> enum 0
-            and set v =
-               if v then attrs <- attrs ||| enum (int32 TypeProviderTypeAttributes.SuppressRelocate)
-               else attrs <- attrs &&& ~~~(enum (int32 TypeProviderTypeAttributes.SuppressRelocate))
+    member __.IsErased
+        with get() = (attrs &&& enum (int32 TypeProviderTypeAttributes.IsErased)) <> enum 0
+        and set v =
+            if v then attrs <- attrs ||| enum (int32 TypeProviderTypeAttributes.IsErased)
+            else attrs <- attrs &&& ~~~(enum (int32 TypeProviderTypeAttributes.IsErased))
 
-        member __.AddInterfaceImplementation interfaceType = interfaceImpls.Add interfaceType
+    member __.SuppressRelocation
+        with get() = (attrs &&& enum (int32 TypeProviderTypeAttributes.SuppressRelocate)) <> enum 0
+        and set v =
+            if v then attrs <- attrs ||| enum (int32 TypeProviderTypeAttributes.SuppressRelocate)
+            else attrs <- attrs &&& ~~~(enum (int32 TypeProviderTypeAttributes.SuppressRelocate))
 
-        member __.AddInterfaceImplementationsDelayed interfacesFunction = interfacesQueue.Add (interfacesFunction >> Array.ofList)
+    member __.AddInterfaceImplementation interfaceType = interfaceImpls.Add interfaceType
 
-        member __.SetAssemblyInternal (assembly: unit -> Assembly)  =
-            match container with
-            | TypeContainer.Namespace (_, ns) -> container <- TypeContainer.Namespace (assembly, ns)
-            | TypeContainer.Type _ -> failwithf "can't set assembly of nested type '%s'" className
-            | TypeContainer.TypeToBeDecided -> failwithf "type '%s' was not added as a member to a declaring type" className
+    member __.AddInterfaceImplementationsDelayed interfacesFunction = interfacesQueue.Add (interfacesFunction >> Array.ofList)
 
-        member __.DefineMethodOverride (methodInfoBody,methodInfoDeclaration) = methodOverrides.Add (methodInfoBody, methodInfoDeclaration)
-        member __.DefineMethodOverridesDelayed f = methodOverridesQueue.Add (f >> Array.ofList)
+    member __.SetAssemblyInternal (assembly: unit -> Assembly)  =
+        match container with
+        | TypeContainer.Namespace (_, ns) -> container <- TypeContainer.Namespace (assembly, ns)
+        | TypeContainer.Type _ -> failwithf "can't set assembly of nested type '%s'" className
+        | TypeContainer.TypeToBeDecided -> failwithf "type '%s' was not added as a member to a declaring type" className
 
-        // This method is used by Debug.fs and QuotationBuilder.fs.
-        // Emulate the F# type provider type erasure mechanism to get the
-        // actual (erased) type. We erase ProvidedTypes to their base type
-        // and we erase array of provided type to array of base type. In the
-        // case of generics all the generic type arguments are also recursively
-        // replaced with the erased-to types
-        static member EraseType(typ:Type): Type =
-            match typ with
-            | :? ProvidedTypeDefinition as ptd when ptd.IsErased -> ProvidedTypeDefinition.EraseType typ.BaseType
-            | t when t.IsArray ->
-                let rank = t.GetArrayRank()
-                let et = ProvidedTypeDefinition.EraseType (t.GetElementType())
-                if rank = 0 then et.MakeArrayType() else et.MakeArrayType(rank)
-            | :? ProvidedTypeSymbol as sym when sym.IsFSharpUnitAnnotated ->
-                typ.UnderlyingSystemType
-            | t when t.IsGenericType && not t.IsGenericTypeDefinition ->
-                let genericTypeDefinition = t.GetGenericTypeDefinition()
-                let genericArguments = t.GetGenericArguments() |> Array.map ProvidedTypeDefinition.EraseType
-                genericTypeDefinition.MakeGenericType(genericArguments)
-            | t -> t
+    member __.DefineMethodOverride (methodInfoBody, methodInfoDeclaration) = methodOverrides.Add (methodInfoBody, methodInfoDeclaration)
+    member __.DefineMethodOverridesDelayed f = methodOverridesQueue.Add (f >> Array.ofList)
+
+    // This method is used by Debug.fs and QuotationBuilder.fs.
+    // Emulate the F# type provider type erasure mechanism to get the
+    // actual (erased) type. We erase ProvidedTypes to their base type
+    // and we erase array of provided type to array of base type. In the
+    // case of generics all the generic type arguments are also recursively
+    // replaced with the erased-to types
+    static member EraseType(typ:Type): Type =
+        match typ with
+        | :? ProvidedTypeDefinition as ptd when ptd.IsErased -> ProvidedTypeDefinition.EraseType typ.BaseType
+        | t when t.IsArray ->
+            let rank = t.GetArrayRank()
+            let et = ProvidedTypeDefinition.EraseType (t.GetElementType())
+            if rank = 0 then et.MakeArrayType() else et.MakeArrayType(rank)
+        | :? ProvidedTypeSymbol as sym when sym.IsFSharpUnitAnnotated ->
+            typ.UnderlyingSystemType
+        | t when t.IsGenericType && not t.IsGenericTypeDefinition ->
+            let genericTypeDefinition = t.GetGenericTypeDefinition()
+            let genericArguments = t.GetGenericArguments() |> Array.map ProvidedTypeDefinition.EraseType
+            genericTypeDefinition.MakeGenericType(genericArguments)
+        | t -> t
 
 
-        member this.PatchDeclaringTypeOfMember (m:MemberInfo) =
-            match m with
-            | :? ProvidedConstructor as c -> c.PatchDeclaringType this
-            | :? ProvidedMethod      as m -> m.PatchDeclaringType this
-            | :? ProvidedProperty    as p -> p.PatchDeclaringType this
-            | :? ProvidedEvent       as e -> e.PatchDeclaringType this
-            | :? ProvidedTypeDefinition  as t -> t.PatchDeclaringType this
-            | :? ProvidedField as l -> l.PatchDeclaringType this
-            | _ -> ()
+    member this.PatchDeclaringTypeOfMember (m:MemberInfo) =
+        match m with
+        | :? ProvidedConstructor as c -> c.PatchDeclaringType this
+        | :? ProvidedMethod      as m -> m.PatchDeclaringType this
+        | :? ProvidedProperty    as p -> p.PatchDeclaringType this
+        | :? ProvidedEvent       as e -> e.PatchDeclaringType this
+        | :? ProvidedTypeDefinition  as t -> t.PatchDeclaringType this
+        | :? ProvidedField as l -> l.PatchDeclaringType this
+        | _ -> ()
 
-        static member Logger: (string -> unit) option ref = ref None
+    static member Logger: (string -> unit) option ref = ref None
 
 
 //====================================================================================================
@@ -1883,9 +1918,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 // A lightweight .NET assembly reader that fits in a single F# file.  Based on the well-tested Abstract IL
 // binary reader code.  Used by the type provider to read referenced asssemblies.
 
-namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes.AssemblyReader
-
-    #nowarn "1182"
+module internal AssemblyReader =
 
     open System
     open System.Collections.Generic
@@ -1894,12 +1927,12 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
     open System.IO
     open System.Reflection
     open System.Text
-    open Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
+    //open ProviderImplementation.ProvidedTypes
 
     [<AutoOpen>]
     module Utils =
 
-        let singleOfBits (x:int32) = System.BitConverter.ToSingle(System.BitConverter.GetBytes(x),0)
+        let singleOfBits (x:int32) = System.BitConverter.ToSingle(System.BitConverter.GetBytes(x), 0)
         let doubleOfBits (x:int64) = System.BitConverter.Int64BitsToDouble(x)
 
         //---------------------------------------------------------------------
@@ -1926,7 +1959,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         module SHA1 =
             let inline (>>>&)  (x:int) (y:int) = int32 (uint32 x >>> y)
-            let f(t,b,c,d) =
+            let f(t, b, c, d) =
                 if t < 20 then (b &&& c) ||| ((~~~b) &&& d)
                 elif t < 40 then b ^^^ c ^^^ d
                 elif t < 60 then (b &&& c) ||| (b &&& d) ||| (c &&& d)
@@ -2005,7 +2038,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     d <- h3
                     e <- h4
                     for t = 0 to 79 do
-                        let temp = (rotLeft32 a 5) + f(t,b,c,d) + e + w.[t] + k(t)
+                        let temp = (rotLeft32 a 5) + f(t, b, c, d) + e + w.[t] + k(t)
                         e <- d
                         d <- c
                         c <- rotLeft32 b 30
@@ -2016,10 +2049,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     h2 <- h2 + c
                     h3 <- h3 + d
                     h4 <- h4 + e
-                h0,h1,h2,h3,h4
+                h0, h1, h2, h3, h4
 
             let sha1HashBytes s =
-                let (_h0,_h1,_h2,h3,h4) = sha1Hash { stream = s; pos = 0; eof = false }   // the result of the SHA algorithm is stored in registers 3 and 4
+                let (_h0, _h1, _h2, h3, h4) = sha1Hash { stream = s; pos = 0; eof = false }   // the result of the SHA algorithm is stored in registers 3 and 4
                 Array.map byte [|  b0 h4; b1 h4; b2 h4; b3 h4; b0 h3; b1 h3; b2 h3; b3 h3; |]
 
 
@@ -2058,11 +2091,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             match x.Version with
             | USome v -> asmName.Version <- v
             | UNone -> ()
-    #if NETSTANDARD
             asmName.CultureName <- System.Globalization.CultureInfo.InvariantCulture.Name
-    #else
-            asmName.CultureInfo <- System.Globalization.CultureInfo.InvariantCulture
-    #endif
             asmName
 
         static member FromAssemblyName (aname:AssemblyName) =
@@ -2079,11 +2108,11 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             let version =
                match aname.Version with
                | null -> UNone
-               | v -> USome (Version(v.Major,v.Minor,v.Build,v.Revision))
+               | v -> USome (Version(v.Major, v.Minor, v.Build, v.Revision))
 
             let retargetable = aname.Flags = System.Reflection.AssemblyNameFlags.Retargetable
 
-            ILAssemblyRef(aname.Name,UNone,publicKey,retargetable,version,locale)
+            ILAssemblyRef(aname.Name, UNone, publicKey, retargetable, version, locale)
 
         member aref.QualifiedName =
             let b = new StringBuilder(100)
@@ -2126,12 +2155,44 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             b.ToString()
         override x.ToString() = x.QualifiedName
 
+        override __.GetHashCode() =
+
+            name.GetHashCode() +
+            137 * (hash.GetHashCode() +
+                137 * (publicKey.GetHashCode() +
+                    137 * ( retargetable.GetHashCode() +
+                        137 * ( version.GetHashCode() +
+                                137 * locale.GetHashCode()))))
+
+            override __.Equals(obj: obj) =
+                match obj with
+                | :? ILAssemblyRef as y ->
+                    name = y.Name
+                    && hash = y.Hash
+                    && publicKey = y.PublicKey
+                    && retargetable = y.Retargetable
+                    && version = y.Version
+                    && locale = y.Locale
+                | _ -> false
 
     type ILModuleRef(name:string, hasMetadata: bool, hash: byte[] uoption) =
         member __.Name=name
         member __.HasMetadata=hasMetadata
         member __.Hash=hash
         override __.ToString() = "module " + name
+
+        override __.GetHashCode() =
+            name.GetHashCode()
+            + 137 * (hasMetadata.GetHashCode()
+                + 137 * hash.GetHashCode())
+
+        override __.Equals(obj: obj) =
+            match obj with
+            | :? ILModuleRef as y ->
+                name = y.Name
+                && hasMetadata = y.HasMetadata
+                && hash = y.Hash
+            | _ -> false
 
 
     [<RequireQualifiedAccess>]
@@ -2161,7 +2222,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         | ILArrayShape of ILArrayBounds[] (* lobound/size pairs *)
         member x.Rank = (let (ILArrayShape l) = x in l.Length)
         static member SingleDimensional = ILArrayShapeStatics.SingleDimensional
-        static member FromRank n = if n = 1 then ILArrayShape.SingleDimensional else ILArrayShape(List.replicate n (Some 0,None) |> List.toArray)
+        static member FromRank n = if n = 1 then ILArrayShape.SingleDimensional else ILArrayShape(List.replicate n (Some 0, None) |> List.toArray)
 
 
     and ILArrayShapeStatics() =
@@ -2187,8 +2248,8 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
     [<StructuralEquality; StructuralComparison>]
     type ILCallingConv =
         | Callconv of ILThisConvention * ILArgConvention
-        member x.ThisConv = let (Callconv(a,_b)) = x in a
-        member x.BasicConv = let (Callconv(_a,b)) = x in b
+        member x.ThisConv = let (Callconv(a, _b)) = x in a
+        member x.BasicConv = let (Callconv(_a, b)) = x in b
         member x.IsInstance = match x.ThisConv with ILThisConvention.Instance -> true | _ -> false
         member x.IsInstanceExplicit = match x.ThisConv with ILThisConvention.InstanceExplicit -> true | _ -> false
         member x.IsStatic = match x.ThisConv with ILThisConvention.Static -> true | _ -> false
@@ -2198,8 +2259,8 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     /// Static storage to amortize the allocation of ILCallingConv.Instance and ILCallingConv.Static
     and ILCallingConvStatics() =
-        static let instanceCallConv = Callconv(ILThisConvention.Instance,ILArgConvention.Default)
-        static let staticCallConv =  Callconv(ILThisConvention.Static,ILArgConvention.Default)
+        static let instanceCallConv = Callconv(ILThisConvention.Instance, ILArgConvention.Default)
+        static let staticCallConv =  Callconv(ILThisConvention.Static, ILArgConvention.Default)
         static member Instance = instanceCallConv
         static member Static = staticCallConv
 
@@ -2222,6 +2283,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     // IL type references have a pre-computed hash code to enable quick lookup tables during binary generation.
     and ILTypeRef(enc: ILTypeRefScope, nsp: string uoption, name: string) =
+        let hashCode = hash enc + 137 *( 137 *(hash name) + hash nsp)
 
         member __.Scope = enc
         member __.Name = name
@@ -2243,8 +2305,20 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         override x.ToString() = x.FullName
 
+        override __.GetHashCode() = hashCode
+
+        override __.Equals(obj: obj) =
+            match obj with
+            | :? ILTypeRef as y ->
+                enc = y.Scope
+                && name = y.Name
+                && nsp = y.Namespace
+            | _ -> false
+
 
     and ILTypeSpec(typeRef: ILTypeRef, inst: ILGenericArgs) =
+        let hashCode = hash typeRef + 137 * (hash inst)
+
         member __.TypeRef = typeRef
         member x.Scope = x.TypeRef.Scope
         member x.Name = x.TypeRef.Name
@@ -2255,7 +2329,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             if x.GenericArgs.Length = 0 then
                 tc
             else
-                tc + "[" + String.concat "," (x.GenericArgs |> Array.map (fun arg -> "[" + arg.QualifiedName + "]")) + "]"
+                tc + "[" + String.concat ", " (x.GenericArgs |> Array.map (fun arg -> "[" + arg.QualifiedName + "]")) + "]"
 
         member x.QualifiedNameExtension =
             x.TypeRef.QualifiedNameExtension
@@ -2263,6 +2337,14 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         member x.FullName = x.TypeRef.FullName
 
         override x.ToString() = x.TypeRef.ToString() + (if x.GenericArgs.Length = 0 then "" else "<...>")
+
+        override __.GetHashCode() = hashCode
+        override __.Equals(obj: obj) =
+            match obj with
+            | :? ILTypeSpec as y ->
+                typeRef = y.TypeRef
+                && inst = y.GenericArgs
+            | _ -> false
 
     and [<RequireQualifiedAccess>]
         ILType =
@@ -2279,8 +2361,8 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         member x.BasicQualifiedName =
             match x with
             | ILType.Var n -> "!" + string n
-            | ILType.Modified(_,_ty1,ty2) -> ty2.BasicQualifiedName
-            | ILType.Array (ILArrayShape(s),ty) -> ty.BasicQualifiedName + "[" + System.String(',',s.Length-1) + "]"
+            | ILType.Modified(_, _ty1, ty2) -> ty2.BasicQualifiedName
+            | ILType.Array (ILArrayShape(s), ty) -> ty.BasicQualifiedName + "[" + System.String(',', s.Length-1) + "]"
             | ILType.Value tr | ILType.Boxed tr -> tr.BasicQualifiedName
             | ILType.Void -> "void"
             | ILType.Ptr _ty -> failwith "unexpected pointer type"
@@ -2290,8 +2372,8 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         member x.QualifiedNameExtension =
             match x with
             | ILType.Var _n -> ""
-            | ILType.Modified(_,_ty1,ty2) -> ty2.QualifiedNameExtension
-            | ILType.Array (ILArrayShape(_s),ty) -> ty.QualifiedNameExtension
+            | ILType.Modified(_, _ty1, ty2) -> ty2.QualifiedNameExtension
+            | ILType.Array (ILArrayShape(_s), ty) -> ty.QualifiedNameExtension
             | ILType.Value tr | ILType.Boxed tr -> tr.QualifiedNameExtension
             | ILType.Void -> failwith "void"
             | ILType.Ptr _ty -> failwith "unexpected pointer type"
@@ -2351,7 +2433,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         member __.ArgTypes = args
         member __.ReturnType = ret
 
-        member x.CallingSignature = ILCallingSignature (x.CallingConv,x.ArgTypes,x.ReturnType)
+        member x.CallingSignature = ILCallingSignature (x.CallingConv, x.ArgTypes, x.ReturnType)
         override x.ToString() = x.EnclosingTypeRef.ToString() + "::" + x.Name + "(...)"
 
 
@@ -2469,7 +2551,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         member x.Column=x.sourceColumn
         member x.EndLine=x.sourceEndLine
         member x.EndColumn=x.sourceEndColumn
-        override x.ToString() = sprintf "(%d,%d)-(%d,%d)" x.Line x.Column x.EndLine x.EndColumn
+        override x.ToString() = sprintf "(%d, %d)-(%d, %d)" x.Line x.Column x.EndLine x.EndColumn
 #endif
 
     [<StructuralEquality; NoComparison>]
@@ -2612,7 +2694,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     [<NoEquality; NoComparison>]
     type ILCode =
-        { Labels: Dictionary<ILCodeLabel,int>
+        { Labels: Dictionary<ILCodeLabel, int>
           Instrs:ILInstr[]
           Exceptions: ILExceptionSpec[]
           Locals: ILLocalDebugInfo[] }
@@ -2697,8 +2779,8 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
     type ILOverridesSpec =
         | OverridesSpec of ILMethodRef * ILType
-        member x.MethodRef = let (OverridesSpec(mr,_ty)) = x in mr
-        member x.EnclosingType = let (OverridesSpec(_mr,ty)) = x in ty
+        member x.MethodRef = let (OverridesSpec(mr, _ty)) = x in mr
+        member x.EnclosingType = let (OverridesSpec(_mr, ty)) = x in ty
 
     [<StructuralEquality; StructuralComparison>]
     type ILGenericVariance =
@@ -2759,7 +2841,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         member x.IsNoInline = (int x.ImplAttributes &&& 0x0008 <> 0)
         member x.Access = ILMemberAccess.OfFlags (int x.Attributes)
 
-        member md.CallingSignature =  ILCallingSignature (md.CallingConv,md.ParameterTypes,md.Return.Type)
+        member md.CallingSignature =  ILCallingSignature (md.CallingConv, md.ParameterTypes, md.Return.Type)
         override x.ToString() = "method " + x.Name
 
     type ILMethodDefs(larr: Lazy<ILMethodDef[]>) =
@@ -2778,9 +2860,9 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         member __.Entries = larr.Force()
         member __.FindByName nm =
-            let scc,ys = getmap().TryGetValue(nm)
+            let scc, ys = getmap().TryGetValue(nm)
             if scc then ys else Array.empty
-        member x.FindByNameAndArity (nm,arity) =  x.FindByName nm |> Array.filter (fun x -> x.Parameters.Length = arity)
+        member x.FindByNameAndArity (nm, arity) =  x.FindByName nm |> Array.filter (fun x -> x.Parameters.Length = arity)
         member x.TryFindUniqueByName name =
             match x.FindByName(name) with
             | [| md |] -> Some md
@@ -2992,11 +3074,11 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             lmap
 
         member __.Entries =
-            [| for (_,_,td) in larr.Force() -> td.Force() |]
+            [| for (_, _, td) in larr.Force() -> td.Force() |]
 
-        member __.TryFindByName (nsp,nm)  =
+        member __.TryFindByName (nsp, nm)  =
             let tdefs = getmap()
-            let key = (nsp,nm)
+            let key = (nsp, nm)
             if tdefs.ContainsKey key then
                 Some (tdefs.[key].Force())
             else
@@ -3010,7 +3092,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override x.ToString() = "nested fwd " + x.Name
 
     and ILNestedExportedTypesAndForwarders(larr:Lazy<ILNestedExportedType[]>) =
-        let lmap = lazy ((Map.empty, larr.Force()) ||> Array.fold (fun m x -> m.Add(x.Name,x)))
+        let lmap = lazy ((Map.empty, larr.Force()) ||> Array.fold (fun m x -> m.Add(x.Name, x)))
         member __.Entries = larr.Force()
         member __.TryFindByName nm = lmap.Force().TryFind nm
 
@@ -3035,7 +3117,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     lmap.[key] <- ltd
             lmap
         member __.Entries = larr.Force()
-        member __.TryFindByName (nsp,nm) = match getmap().TryGetValue ((nsp,nm)) with true,v -> Some v | false, _ -> None
+        member __.TryFindByName (nsp, nm) = match getmap().TryGetValue ((nsp, nm)) with true, v -> Some v | false, _ -> None
 
     [<RequireQualifiedAccess>]
     type ILResourceAccess =
@@ -3081,11 +3163,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             match x.Version with
             | USome v -> asmName.Version <- v
             | UNone -> ()
-    #if NETSTANDARD
             asmName.CultureName <- System.Globalization.CultureInfo.InvariantCulture.Name
-    #else
-            asmName.CultureInfo <- System.Globalization.CultureInfo.InvariantCulture
-    #endif
             asmName
 
         override x.ToString() = "manifest " + x.Name
@@ -3209,7 +3287,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         // Metainfo -schema reports sorting as shown below.
         // But some sorting, e.g. EventMap does not seem to show
         let sortedTableInfo =
-          [ (InterfaceImpl,0)
+          [ (InterfaceImpl, 0)
             (Constant, 1)
             (CustomAttribute, 0)
             (FieldMarshal, 0)
@@ -3335,7 +3413,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
     type TaggedIndex<'T> =
         val tag: 'T
         val index: int32
-        new(tag,index) = { tag=tag; index=index }
+        new(tag, index) = { tag=tag; index=index }
 
 
     type ILImageChunk = { size: int32; addr: int32 }
@@ -3444,23 +3522,23 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         let i32ToUncodedToken tok  =
             let idx = tok &&& 0xffffff
             let tab = tok >>>& 24
-            (ILTableName.FromIndex tab,  idx)
+            (ILTableName.FromIndex tab, idx)
 
 
-        let uncodedTokenToTypeDefOrRefOrSpec (tab,tok) =
+        let uncodedTokenToTypeDefOrRefOrSpec (tab, tok) =
             let tag =
                 if tab = ILTableNames.TypeDef then TypeDefOrRefOrSpecTag.TypeDef
                 elif tab = ILTableNames.TypeRef then TypeDefOrRefOrSpecTag.TypeRef
                 elif tab = ILTableNames.TypeSpec then TypeDefOrRefOrSpecTag.TypeSpec
                 else failwith "bad table in uncodedTokenToTypeDefOrRefOrSpec"
-            TaggedIndex(tag,tok)
+            TaggedIndex(tag, tok)
 
-        let uncodedTokenToMethodDefOrRef (tab,tok) =
+        let uncodedTokenToMethodDefOrRef (tab, tok) =
             let tag =
                 if tab = ILTableNames.Method then MethodDefOrRefTag.MethodDef
                 elif tab = ILTableNames.MemberRef then MethodDefOrRefTag.MemberRef
                 else failwith "bad table in uncodedTokenToMethodDefOrRef"
-            TaggedIndex(tag,tok)
+            TaggedIndex(tag, tok)
 
         let (|TaggedIndex|) (x:TaggedIndex<'T>) = x.tag, x.index
         let tokToTaggedIdx f nbits tok =
@@ -3695,129 +3773,129 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         let i_stelem_any = 0xa4
         let i_unbox_any = 0xa5
 
-        let mk_ldc i = I_ldc (DT_I4,ILConst.I4 i)
-        let mk_ldc_i8 i = I_ldc (DT_I8,ILConst.I8 i)
+        let mk_ldc i = I_ldc (DT_I4, ILConst.I4 i)
+        let mk_ldc_i8 i = I_ldc (DT_I8, ILConst.I8 i)
         let mkNormalCall mspec = I_call (Normalcall, mspec, None)
         let mkILFormalGenericArgs numtypars (n:int) =
             Array.init n (fun i -> ILType.Var (numtypars + i))
 
 
         let noArgInstrs  =
-           lazy [ i_ldc_i4_0,           mk_ldc 0
-                  i_ldc_i4_1,           mk_ldc 1
-                  i_ldc_i4_2,           mk_ldc 2
-                  i_ldc_i4_3,           mk_ldc 3
-                  i_ldc_i4_4,           mk_ldc 4
-                  i_ldc_i4_5,           mk_ldc 5
-                  i_ldc_i4_6,           mk_ldc 6
-                  i_ldc_i4_7,           mk_ldc 7
-                  i_ldc_i4_8,           mk_ldc 8
-                  i_ldc_i4_m1,           mk_ldc -1
-                  0x0a,            I_stloc 0
-                  0x0b,            I_stloc 1
-                  0x0c,            I_stloc 2
-                  0x0d,            I_stloc 3
-                  0x06,            I_ldloc 0
-                  0x07,            I_ldloc 1
-                  0x08,            I_ldloc 2
-                  0x09,            I_ldloc 3
-                  0x02,            I_ldarg 0
-                  0x03,            I_ldarg 1
-                  0x04,            I_ldarg 2
-                  0x05,            I_ldarg 3
-                  0x2a,              I_ret
-                  0x58,              I_add
-                  0xd6,        I_add_ovf
-                  0xd7,   I_add_ovf_un
-                  0x5f,              I_and
-                  0x5b,              I_div
-                  0x5c,         I_div_un
-                  0xfe01,              I_ceq
-                  0xfe02,              I_cgt
-                  0xfe03,         I_cgt_un
-                  0xfe04,              I_clt
-                  0xfe05,         I_clt_un
-                  0x67,        I_conv DT_I1
-                  0x68,   I_conv DT_I2
-                  0x69,   I_conv DT_I4
-                  0x6a,   I_conv DT_I8
-                  0xd3,   I_conv DT_I
-                  0x6b,   I_conv DT_R4
-                  0x6c,   I_conv DT_R8
-                  0xd2,   I_conv DT_U1
-                  0xd1,   I_conv DT_U2
-                  0x6d,   I_conv DT_U4
-                  0x6e,   I_conv DT_U8
-                  0xe0,   I_conv DT_U
-                  0x76,   I_conv DT_R
-                  0xb3,   I_conv_ovf DT_I1
-                  0xb5,   I_conv_ovf DT_I2
-                  0xb7,   I_conv_ovf DT_I4
-                  0xb9,   I_conv_ovf DT_I8
-                  0xd4,   I_conv_ovf DT_I
-                  0xb4,   I_conv_ovf DT_U1
-                  0xb6,   I_conv_ovf DT_U2
-                  0xb8,   I_conv_ovf DT_U4
-                  0xba,   I_conv_ovf DT_U8
-                  0xd5,   I_conv_ovf DT_U
-                  0x82,   I_conv_ovf_un DT_I1
-                  0x83,   I_conv_ovf_un DT_I2
-                  0x84,   I_conv_ovf_un DT_I4
-                  0x85,   I_conv_ovf_un DT_I8
-                  0x8a,   I_conv_ovf_un DT_I
-                  0x86,   I_conv_ovf_un DT_U1
-                  0x87,   I_conv_ovf_un DT_U2
-                  0x88,   I_conv_ovf_un DT_U4
-                  0x89,   I_conv_ovf_un DT_U8
-                  0x8b,   I_conv_ovf_un DT_U
-                  0x9c,   I_stelem DT_I1
-                  0x9d,   I_stelem DT_I2
-                  0x9e,   I_stelem DT_I4
-                  0x9f,   I_stelem DT_I8
-                  0xa0,   I_stelem DT_R4
-                  0xa1,   I_stelem DT_R8
-                  0x9b,   I_stelem DT_I
-                  0xa2,   I_stelem DT_REF
-                  0x90,   I_ldelem DT_I1
-                  0x92,   I_ldelem DT_I2
-                  0x94,   I_ldelem DT_I4
-                  0x96,   I_ldelem DT_I8
-                  0x91,   I_ldelem DT_U1
-                  0x93,   I_ldelem DT_U2
-                  0x95,   I_ldelem DT_U4
-                  0x98,   I_ldelem DT_R4
-                  0x99,   I_ldelem DT_R8
-                  0x97,   I_ldelem DT_I
-                  0x9a,   I_ldelem DT_REF
-                  0x5a,   I_mul
-                  0xd8,   I_mul_ovf
-                  0xd9,   I_mul_ovf_un
-                  0x5d,   I_rem
-                  0x5e,   I_rem_un
-                  0x62,   I_shl
-                  0x63,   I_shr
-                  0x64,   I_shr_un
-                  0x59,   I_sub
-                  0xda,   I_sub_ovf
-                  0xdb,   I_sub_ovf_un
-                  0x61,   I_xor
-                  0x60,   I_or
-                  0x65,   I_neg
-                  0x66,   I_not
-                  i_ldnull,     I_ldnull
-                  i_dup,        I_dup
-                  i_pop,        I_pop
-                  i_ckfinite,   I_ckfinite
-                  i_nop,        I_nop
-                  i_break,      I_break
-                  i_arglist,    I_arglist
-                  i_endfilter,  I_endfilter
+           lazy [ i_ldc_i4_0, mk_ldc 0
+                  i_ldc_i4_1, mk_ldc 1
+                  i_ldc_i4_2, mk_ldc 2
+                  i_ldc_i4_3, mk_ldc 3
+                  i_ldc_i4_4, mk_ldc 4
+                  i_ldc_i4_5, mk_ldc 5
+                  i_ldc_i4_6, mk_ldc 6
+                  i_ldc_i4_7, mk_ldc 7
+                  i_ldc_i4_8, mk_ldc 8
+                  i_ldc_i4_m1, mk_ldc -1
+                  0x0a, I_stloc 0
+                  0x0b, I_stloc 1
+                  0x0c, I_stloc 2
+                  0x0d, I_stloc 3
+                  0x06, I_ldloc 0
+                  0x07, I_ldloc 1
+                  0x08, I_ldloc 2
+                  0x09, I_ldloc 3
+                  0x02, I_ldarg 0
+                  0x03, I_ldarg 1
+                  0x04, I_ldarg 2
+                  0x05, I_ldarg 3
+                  0x2a, I_ret
+                  0x58, I_add
+                  0xd6, I_add_ovf
+                  0xd7, I_add_ovf_un
+                  0x5f, I_and
+                  0x5b, I_div
+                  0x5c, I_div_un
+                  0xfe01, I_ceq
+                  0xfe02, I_cgt
+                  0xfe03, I_cgt_un
+                  0xfe04, I_clt
+                  0xfe05, I_clt_un
+                  0x67, I_conv DT_I1
+                  0x68, I_conv DT_I2
+                  0x69, I_conv DT_I4
+                  0x6a, I_conv DT_I8
+                  0xd3, I_conv DT_I
+                  0x6b, I_conv DT_R4
+                  0x6c, I_conv DT_R8
+                  0xd2, I_conv DT_U1
+                  0xd1, I_conv DT_U2
+                  0x6d, I_conv DT_U4
+                  0x6e, I_conv DT_U8
+                  0xe0, I_conv DT_U
+                  0x76, I_conv DT_R
+                  0xb3, I_conv_ovf DT_I1
+                  0xb5, I_conv_ovf DT_I2
+                  0xb7, I_conv_ovf DT_I4
+                  0xb9, I_conv_ovf DT_I8
+                  0xd4, I_conv_ovf DT_I
+                  0xb4, I_conv_ovf DT_U1
+                  0xb6, I_conv_ovf DT_U2
+                  0xb8, I_conv_ovf DT_U4
+                  0xba, I_conv_ovf DT_U8
+                  0xd5, I_conv_ovf DT_U
+                  0x82, I_conv_ovf_un DT_I1
+                  0x83, I_conv_ovf_un DT_I2
+                  0x84, I_conv_ovf_un DT_I4
+                  0x85, I_conv_ovf_un DT_I8
+                  0x8a, I_conv_ovf_un DT_I
+                  0x86, I_conv_ovf_un DT_U1
+                  0x87, I_conv_ovf_un DT_U2
+                  0x88, I_conv_ovf_un DT_U4
+                  0x89, I_conv_ovf_un DT_U8
+                  0x8b, I_conv_ovf_un DT_U
+                  0x9c, I_stelem DT_I1
+                  0x9d, I_stelem DT_I2
+                  0x9e, I_stelem DT_I4
+                  0x9f, I_stelem DT_I8
+                  0xa0, I_stelem DT_R4
+                  0xa1, I_stelem DT_R8
+                  0x9b, I_stelem DT_I
+                  0xa2, I_stelem DT_REF
+                  0x90, I_ldelem DT_I1
+                  0x92, I_ldelem DT_I2
+                  0x94, I_ldelem DT_I4
+                  0x96, I_ldelem DT_I8
+                  0x91, I_ldelem DT_U1
+                  0x93, I_ldelem DT_U2
+                  0x95, I_ldelem DT_U4
+                  0x98, I_ldelem DT_R4
+                  0x99, I_ldelem DT_R8
+                  0x97, I_ldelem DT_I
+                  0x9a, I_ldelem DT_REF
+                  0x5a, I_mul
+                  0xd8, I_mul_ovf
+                  0xd9, I_mul_ovf_un
+                  0x5d, I_rem
+                  0x5e, I_rem_un
+                  0x62, I_shl
+                  0x63, I_shr
+                  0x64, I_shr_un
+                  0x59, I_sub
+                  0xda, I_sub_ovf
+                  0xdb, I_sub_ovf_un
+                  0x61, I_xor
+                  0x60, I_or
+                  0x65, I_neg
+                  0x66, I_not
+                  i_ldnull, I_ldnull
+                  i_dup, I_dup
+                  i_pop, I_pop
+                  i_ckfinite, I_ckfinite
+                  i_nop, I_nop
+                  i_break, I_break
+                  i_arglist, I_arglist
+                  i_endfilter, I_endfilter
                   i_endfinally, I_endfinally
                   i_refanytype, I_refanytype
-                  i_localloc,   I_localloc
-                  i_throw,      I_throw
-                  i_ldlen,      I_ldlen
-                  i_rethrow,    I_rethrow ]
+                  i_localloc, I_localloc
+                  i_throw, I_throw
+                  i_ldlen, I_ldlen
+                  i_rethrow, I_rethrow ]
 
         let isNoArgInstr i =
           match i with
@@ -4096,10 +4174,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 b.pos <- b.pos + 1
                 res
             member b.ReadUtf8String n =
-                let res = Encoding.UTF8.GetString(b.bytes,b.pos,n)
+                let res = Encoding.UTF8.GetString(b.bytes, b.pos, n)
                 b.pos <- b.pos + n; res
 
-            static member FromBytes (b:byte[],n,len) =
+            static member FromBytes (b:byte[], n, len) =
                 if n < 0 || (n+len) > b.Length then failwith "FromBytes"
                 { bytes = b; pos = n; max = n+len }
 
@@ -4323,21 +4401,21 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             bytes.[sigptr], sigptr + 1
 
         let sigptrGetBool bytes sigptr =
-            let b0,sigptr = sigptrGetByte bytes sigptr
-            (b0 = 0x01uy) ,sigptr
+            let b0, sigptr = sigptrGetByte bytes sigptr
+            (b0 = 0x01uy) , sigptr
 
         let sigptrGetSByte bytes sigptr =
-            let i,sigptr = sigptrGetByte bytes sigptr
-            sbyte i,sigptr
+            let i, sigptr = sigptrGetByte bytes sigptr
+            sbyte i, sigptr
 
         let sigptrGetUInt16 bytes sigptr =
-            let b0,sigptr = sigptrGetByte bytes sigptr
-            let b1,sigptr = sigptrGetByte bytes sigptr
-            uint16 (int b0 ||| (int b1 <<< 8)),sigptr
+            let b0, sigptr = sigptrGetByte bytes sigptr
+            let b1, sigptr = sigptrGetByte bytes sigptr
+            uint16 (int b0 ||| (int b1 <<< 8)), sigptr
 
         let sigptrGetInt16 bytes sigptr =
-            let u,sigptr = sigptrGetUInt16 bytes sigptr
-            int16 u,sigptr
+            let u, sigptr = sigptrGetUInt16 bytes sigptr
+            int16 u, sigptr
 
         let sigptrGetInt32 (bytes: byte[]) sigptr =
             let b0 = bytes.[sigptr]
@@ -4348,43 +4426,43 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             res, sigptr + 4
 
         let sigptrGetUInt32 bytes sigptr =
-            let u,sigptr = sigptrGetInt32 bytes sigptr
-            uint32 u,sigptr
+            let u, sigptr = sigptrGetInt32 bytes sigptr
+            uint32 u, sigptr
 
         let sigptrGetUInt64 bytes sigptr =
-            let u0,sigptr = sigptrGetUInt32 bytes sigptr
-            let u1,sigptr = sigptrGetUInt32 bytes sigptr
-            (uint64 u0 ||| (uint64 u1 <<< 32)),sigptr
+            let u0, sigptr = sigptrGetUInt32 bytes sigptr
+            let u1, sigptr = sigptrGetUInt32 bytes sigptr
+            (uint64 u0 ||| (uint64 u1 <<< 32)), sigptr
 
         let sigptrGetInt64 bytes sigptr =
-            let u,sigptr = sigptrGetUInt64 bytes sigptr
-            int64 u,sigptr
+            let u, sigptr = sigptrGetUInt64 bytes sigptr
+            int64 u, sigptr
 
         let sigptrGetSingle bytes sigptr =
-            let u,sigptr = sigptrGetInt32 bytes sigptr
-            singleOfBits u,sigptr
+            let u, sigptr = sigptrGetInt32 bytes sigptr
+            singleOfBits u, sigptr
 
         let sigptrGetDouble bytes sigptr =
-            let u,sigptr = sigptrGetInt64 bytes sigptr
-            doubleOfBits u,sigptr
+            let u, sigptr = sigptrGetInt64 bytes sigptr
+            doubleOfBits u, sigptr
 
         let sigptrGetZInt32 bytes sigptr =
-            let b0,sigptr = sigptrGetByte bytes sigptr
+            let b0, sigptr = sigptrGetByte bytes sigptr
             if b0 <= 0x7Fuy then int b0, sigptr
             elif b0 <= 0xBFuy then
                 let b0 = b0 &&& 0x7Fuy
-                let b1,sigptr = sigptrGetByte bytes sigptr
+                let b1, sigptr = sigptrGetByte bytes sigptr
                 (int b0 <<< 8) ||| int b1, sigptr
             else
                 let b0 = b0 &&& 0x3Fuy
-                let b1,sigptr = sigptrGetByte bytes sigptr
-                let b2,sigptr = sigptrGetByte bytes sigptr
-                let b3,sigptr = sigptrGetByte bytes sigptr
+                let b1, sigptr = sigptrGetByte bytes sigptr
+                let b2, sigptr = sigptrGetByte bytes sigptr
+                let b3, sigptr = sigptrGetByte bytes sigptr
                 (int b0 <<< 24) ||| (int  b1 <<< 16) ||| (int b2 <<< 8) ||| int b3, sigptr
 
         let rec sigptrFoldAcc f n (bytes:byte[]) (sigptr:int) i acc =
             if i < n then
-                let x,sp = f bytes sigptr
+                let x, sp = f bytes sigptr
                 sigptrFoldAcc f n bytes sp (i+1) (x::acc)
             else
                 Array.ofList (List.rev acc), sigptr
@@ -4399,11 +4477,11 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 res, sigptr + n
 
         let sigptrGetString n bytes sigptr =
-            let bytearray,sigptr = sigptrGetBytes n bytes sigptr
-            (Encoding.UTF8.GetString(bytearray, 0, bytearray.Length)),sigptr
+            let bytearray, sigptr = sigptrGetBytes n bytes sigptr
+            (Encoding.UTF8.GetString(bytearray, 0, bytearray.Length)), sigptr
 
-        let chunk sz next = ({addr=next; size=sz},next + sz)
-        let nochunk next = ({addr= 0x0;size= 0x0; } ,next)
+        let chunk sz next = ({addr=next; size=sz}, next + sz)
+        let nochunk next = ({addr= 0x0;size= 0x0; } , next)
 
 
         let kindAssemblyRef = ILRowKind [ UShort; UShort; UShort; UShort; ULong; Blob; SString; SString; Blob; ]
@@ -4473,7 +4551,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             fun f (idx:int32) ->
                 let cache =
                     match !cache with
-                    | null -> cache :=  new Dictionary<int32,_>(11)
+                    | null -> cache :=  new Dictionary<int32, _>(11)
                     | _ -> ()
                     !cache
                 let mutable res = Unchecked.defaultof<_>
@@ -4491,7 +4569,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             fun f (idx :'T) ->
                 let cache =
                     match !cache with
-                    | null -> cache := new Dictionary<_,_>(11 (* sz:int *) )
+                    | null -> cache := new Dictionary<_, _>(11 (* sz:int *) )
                     | _ -> ()
                     !cache
                 if cache.ContainsKey idx then cache.[idx]
@@ -4582,7 +4660,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         let getName (ltd: Lazy<ILTypeDef>) =
             let td = ltd.Force()
-            (td.Name,ltd)
+            (td.Name, ltd)
 
         let emptyILEvents = { new ILEventDefs with member __.Entries = [| |] }
         let emptyILProperties = { new ILPropertyDefs with member __.Entries = [| |] }
@@ -4602,18 +4680,18 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         let typeNameForGlobalFunctions = "<Module>"
 
-        let mkILNonGenericTySpec tref =  ILTypeSpec (tref,[| |])
+        let mkILNonGenericTySpec tref =  ILTypeSpec (tref, [| |])
         let mkILTypeForGlobalFunctions scoref = ILType.Boxed (mkILNonGenericTySpec (ILTypeRef(ILTypeRefScope.Top scoref, UNone, typeNameForGlobalFunctions)))
-        let mkILArrTy (ty, shape) = ILType.Array(shape,ty)
+        let mkILArrTy (ty, shape) = ILType.Array(shape, ty)
 
         let mkILMethSpecInTyRaw (typ:ILType, cc, nm, args, rty, minst:ILGenericArgs) =
-            ILMethodSpec (ILMethodRef (typ.TypeRef,cc,minst.Length,nm,args,rty),typ,minst)
+            ILMethodSpec (ILMethodRef (typ.TypeRef, cc, minst.Length, nm, args, rty), typ, minst)
 
-        let mkILFieldSpecInTy (typ:ILType,nm,fty) =
-            ILFieldSpec (ILFieldRef (typ.TypeRef,nm,fty), typ)
+        let mkILFieldSpecInTy (typ:ILType, nm, fty) =
+            ILFieldSpec (ILFieldRef (typ.TypeRef, nm, fty), typ)
 
         let mkILGlobals systemRuntimeScopeRef =
-              let mkILTyspec nsp nm =  mkILNonGenericTySpec(ILTypeRef(ILTypeRefScope.Top(systemRuntimeScopeRef),USome nsp,nm))
+              let mkILTyspec nsp nm =  mkILNonGenericTySpec(ILTypeRef(ILTypeRefScope.Top(systemRuntimeScopeRef), USome nsp, nm))
               { typ_Object = ILType.Boxed (mkILTyspec "System" "Object")
                 typ_String = ILType.Boxed (mkILTyspec "System" "String")
                 typ_Void = ILType.Value (mkILTyspec "System" "Void")
@@ -4636,7 +4714,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 typ_UIntPtr = ILType.Value (mkILTyspec "System" "UIntPtr")
                 systemRuntimeScopeRef = systemRuntimeScopeRef }
 
-        type PEReader(infile: string, is: ByteFile) =
+        type PEReader(fileName: string, is: ByteFile) =
 
             //-----------------------------------------------------------------------
             // Crack the binary headers, build a reader context and return the lazy
@@ -4695,9 +4773,9 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
              (* x86: 00000160 *)
             let cliHeaderAddr = seekReadInt32 is (peOptionalHeaderPhysLoc + 208 + x64adjust)
 
-            let anyV2P (n,v) =
+            let anyV2P (n, v) =
               let rec look i pos =
-                if i >= numSections then (failwith (infile + ": bad "+n+", rva "+string v); 0x0)
+                if i >= numSections then (failwith (fileName + ": bad "+n+", rva "+string v); 0x0)
                 else
                   let virtSize = seekReadInt32 is (pos + 8)
                   let virtAddr = seekReadInt32 is (pos + 12)
@@ -4706,7 +4784,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                   else look (i+1) (pos + 0x28)
               look 0 sectionHeadersStartPhysLoc
 
-            let cliHeaderPhysLoc = anyV2P ("cli header",cliHeaderAddr)
+            let cliHeaderPhysLoc = anyV2P ("cli header", cliHeaderAddr)
 
             let metadataAddr = seekReadInt32 is (cliHeaderPhysLoc + 8)
             let metadataSize = seekReadInt32 is (cliHeaderPhysLoc + 12)
@@ -4718,16 +4796,18 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             let entryPointToken = seekReadUncodedToken is (cliHeaderPhysLoc + 20)
             let resourcesAddr = seekReadInt32 is (cliHeaderPhysLoc + 24)
 
-            let metadataPhysLoc = anyV2P ("metadata",metadataAddr)
+            let metadataPhysLoc = anyV2P ("metadata", metadataAddr)
+            let resourcePhysLoc offset = anyV2P ("resource", offset + resourcesAddr)
 
             member __.MetadataPhysLoc = metadataPhysLoc
             member __.MetadataSize = metadataSize
+            member __.ResourcePhysLoc offset = resourcePhysLoc offset
 
-        type ILModuleReader(infile: string, is: ByteFile, ilg: ILGlobals, lowMem: bool) =
+        type ILModuleReader(fileName: string, is: ByteFile, ilg: ILGlobals, lowMem: bool) =
 
             let metadataPhysLoc = 0
             let magic = seekReadUInt16AsInt32 is metadataPhysLoc
-            do if magic <> 0x5342 then failwith (infile + ": bad metadata magic number: " + string magic);
+            do if magic <> 0x5342 then failwith (fileName + ": bad metadata magic number: " + string magic);
             let magic2 = seekReadUInt16AsInt32 is (metadataPhysLoc + 2)
             do if magic2 <> 0x424a then failwith "bad metadata magic number";
 
@@ -4756,7 +4836,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                       elif !n >= Array.length name || c <> name.[!n] then
                           res := false;
                       incr n
-                  if !res then Some(offset + metadataPhysLoc,length)
+                  if !res then Some(offset + metadataPhysLoc, length)
                   else look (i+1) (align 0x04 (pos + 8 + (!n)))
               look 0 streamHeadersStart
 
@@ -4774,7 +4854,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 | None ->
                  let firstStreamOffset = seekReadInt32 is (streamHeadersStart + 0)
                  let firstStreamLength = seekReadInt32 is (streamHeadersStart + 4)
-                 firstStreamOffset,firstStreamLength
+                 firstStreamOffset, firstStreamLength
 
             let (stringsStreamPhysicalLoc, stringsStreamSize) = findStream [| 0x23; 0x53; 0x74; 0x72; 0x69; 0x6e; 0x67; 0x73; |] (* #Strings *)
             let (blobsStreamPhysicalLoc, blobsStreamSize) = findStream [| 0x23; 0x42; 0x6c; 0x6f; 0x62; |] (* #Blob *)
@@ -4991,18 +5071,18 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                  res
 
             // All the caches.  The sizes are guesstimates for the rough sharing-density of the assembly
-            let cacheAssemblyRef = mkCacheInt32 lowMem infile "ILAssemblyRef"  (getNumRows ILTableNames.AssemblyRef)
-            let cacheMemberRefAsMemberData = mkCacheGeneric lowMem infile "MemberRefAsMemberData" (getNumRows ILTableNames.MemberRef / 20 + 1)
-            let cacheTypeRef = mkCacheInt32 lowMem infile "ILTypeRef" (getNumRows ILTableNames.TypeRef / 20 + 1)
-            let cacheTypeRefAsType = mkCacheGeneric lowMem infile "TypeRefAsType" (getNumRows ILTableNames.TypeRef / 20 + 1)
-            let cacheBlobHeapAsPropertySig = mkCacheGeneric lowMem infile "BlobHeapAsPropertySig" (getNumRows ILTableNames.Property / 20 + 1)
-            let cacheBlobHeapAsFieldSig = mkCacheGeneric lowMem infile "BlobHeapAsFieldSig" (getNumRows ILTableNames.Field / 20 + 1)
-            let cacheBlobHeapAsMethodSig = mkCacheGeneric lowMem infile "BlobHeapAsMethodSig" (getNumRows ILTableNames.Method / 20 + 1)
-            let cacheTypeDefAsType = mkCacheGeneric lowMem infile "TypeDefAsType" (getNumRows ILTableNames.TypeDef / 20 + 1)
-            let cacheMethodDefAsMethodData = mkCacheInt32 lowMem infile "MethodDefAsMethodData" (getNumRows ILTableNames.Method / 20 + 1)
+            let cacheAssemblyRef = mkCacheInt32 lowMem fileName "ILAssemblyRef"  (getNumRows ILTableNames.AssemblyRef)
+            let cacheMemberRefAsMemberData = mkCacheGeneric lowMem fileName "MemberRefAsMemberData" (getNumRows ILTableNames.MemberRef / 20 + 1)
+            let cacheTypeRef = mkCacheInt32 lowMem fileName "ILTypeRef" (getNumRows ILTableNames.TypeRef / 20 + 1)
+            let cacheTypeRefAsType = mkCacheGeneric lowMem fileName "TypeRefAsType" (getNumRows ILTableNames.TypeRef / 20 + 1)
+            let cacheBlobHeapAsPropertySig = mkCacheGeneric lowMem fileName "BlobHeapAsPropertySig" (getNumRows ILTableNames.Property / 20 + 1)
+            let cacheBlobHeapAsFieldSig = mkCacheGeneric lowMem fileName "BlobHeapAsFieldSig" (getNumRows ILTableNames.Field / 20 + 1)
+            let cacheBlobHeapAsMethodSig = mkCacheGeneric lowMem fileName "BlobHeapAsMethodSig" (getNumRows ILTableNames.Method / 20 + 1)
+            let cacheTypeDefAsType = mkCacheGeneric lowMem fileName "TypeDefAsType" (getNumRows ILTableNames.TypeDef / 20 + 1)
+            let cacheMethodDefAsMethodData = mkCacheInt32 lowMem fileName "MethodDefAsMethodData" (getNumRows ILTableNames.Method / 20 + 1)
             // nb. Lots and lots of cache hits on this cache, hence never optimize cache away
-            let cacheStringHeap = mkCacheInt32 false infile "string heap" ( stringsStreamSize / 50 + 1)
-            let cacheBlobHeap = mkCacheInt32 lowMem infile "blob heap" ( blobsStreamSize / 50 + 1)
+            let cacheStringHeap = mkCacheInt32 false fileName "string heap" ( stringsStreamSize / 50 + 1)
+            let cacheBlobHeap = mkCacheInt32 lowMem fileName "blob heap" ( blobsStreamSize / 50 + 1)
 
            //-----------------------------------------------------------------------
 
@@ -5067,7 +5147,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let scopeIdx = seekReadResolutionScopeIdx &addr
                 let nameIdx = seekReadStringIdx &addr
                 let namespaceIdx = seekReadStringIdx &addr
-                (scopeIdx,nameIdx,namespaceIdx)
+                (scopeIdx, nameIdx, namespaceIdx)
 
             /// Read Table ILTypeDef
             let seekReadTypeDefRow idx =
@@ -5086,7 +5166,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let flags = seekReadUInt16AsInt32Adv &addr
                 let nameIdx = seekReadStringIdx &addr
                 let typeIdx = seekReadBlobIdx &addr
-                (flags,nameIdx,typeIdx)
+                (flags, nameIdx, typeIdx)
 
             /// Read Table Method
             let seekReadMethodRow idx =
@@ -5105,13 +5185,13 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let flags = seekReadUInt16AsInt32Adv &addr
                 let seq =  seekReadUInt16AsInt32Adv &addr
                 let nameIdx = seekReadStringIdx &addr
-                (flags,seq,nameIdx)
+                (flags, seq, nameIdx)
 
             let seekReadInterfaceImplRow idx =
                 let mutable addr = rowAddr ILTableNames.InterfaceImpl idx
                 let tidx = seekReadUntaggedIdx ILTableNames.TypeDef &addr
                 let intfIdx = seekReadTypeDefOrRefOrSpecIdx &addr
-                (tidx,intfIdx)
+                (tidx, intfIdx)
 
             /// Read Table MemberRef
             let seekReadMemberRefRow idx =
@@ -5119,7 +5199,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let mrpIdx = seekReadMemberRefParentIdx &addr
                 let nameIdx = seekReadStringIdx &addr
                 let typeIdx = seekReadBlobIdx &addr
-                (mrpIdx,nameIdx,typeIdx)
+                (mrpIdx, nameIdx, typeIdx)
 
             /// Read Table Constant
             let seekReadConstantRow idx =
@@ -5163,7 +5243,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let mutable addr = rowAddr ILTableNames.EventMap idx
                 let tidx = seekReadUntaggedIdx ILTableNames.TypeDef &addr
                 let eventsIdx = seekReadUntaggedIdx ILTableNames.Event &addr
-                (tidx,eventsIdx)
+                (tidx, eventsIdx)
 
             /// Read Table Event
             let seekReadEventRow idx =
@@ -5171,14 +5251,14 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let flags = seekReadUInt16AsInt32Adv &addr
                 let nameIdx = seekReadStringIdx &addr
                 let typIdx = seekReadTypeDefOrRefOrSpecIdx &addr
-                (flags,nameIdx,typIdx)
+                (flags, nameIdx, typIdx)
 
             /// Read Table PropertyMap
             let seekReadPropertyMapRow idx =
                 let mutable addr = rowAddr ILTableNames.PropertyMap idx
                 let tidx = seekReadUntaggedIdx ILTableNames.TypeDef &addr
                 let propsIdx = seekReadUntaggedIdx ILTableNames.Property &addr
-                (tidx,propsIdx)
+                (tidx, propsIdx)
 
             /// Read Table Property
             let seekReadPropertyRow idx =
@@ -5186,7 +5266,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let flags = seekReadUInt16AsInt32Adv &addr
                 let nameIdx = seekReadStringIdx &addr
                 let typIdx = seekReadBlobIdx &addr
-                (flags,nameIdx,typIdx)
+                (flags, nameIdx, typIdx)
 
             /// Read Table MethodSemantics
             let seekReadMethodSemanticsRow idx =
@@ -5194,7 +5274,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let flags = seekReadUInt16AsInt32Adv &addr
                 let midx = seekReadUntaggedIdx ILTableNames.Method &addr
                 let assocIdx = seekReadHasSemanticsIdx &addr
-                (flags,midx,assocIdx)
+                (flags, midx, assocIdx)
 
             let seekReadMethodImplRow idx =
                 let mutable addr = rowAddr ILTableNames.MethodImpl idx
@@ -5227,7 +5307,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let publicKeyIdx = seekReadBlobIdx &addr
                 let nameIdx = seekReadStringIdx &addr
                 let localeIdx = seekReadStringIdx &addr
-                (hash,v1,v2,v3,v4,flags,publicKeyIdx, nameIdx, localeIdx)
+                (hash, v1, v2, v3, v4, flags, publicKeyIdx, nameIdx, localeIdx)
 
             /// Read Table ILAssemblyRef
             let seekReadAssemblyRefRow idx =
@@ -5241,7 +5321,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let nameIdx = seekReadStringIdx &addr
                 let localeIdx = seekReadStringIdx &addr
                 let hashValueIdx = seekReadBlobIdx &addr
-                (v1,v2,v3,v4,flags,publicKeyOrTokenIdx, nameIdx, localeIdx,hashValueIdx)
+                (v1, v2, v3, v4, flags, publicKeyOrTokenIdx, nameIdx, localeIdx, hashValueIdx)
 
             /// Read Table File
             let seekReadFileRow idx =
@@ -5259,14 +5339,23 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let nameIdx = seekReadStringIdx &addr
                 let namespaceIdx = seekReadStringIdx &addr
                 let implIdx = seekReadImplementationIdx &addr
-                (flags,tok,nameIdx,namespaceIdx,implIdx)
+                (flags, tok, nameIdx, namespaceIdx, implIdx)
+
+            /// Read Table ManifestResource
+            let seekReadManifestResourceRow idx =
+                let mutable addr = rowAddr ILTableNames.ManifestResource idx
+                let offset = seekReadInt32Adv &addr
+                let flags = seekReadInt32Adv &addr
+                let nameIdx = seekReadStringIdx &addr
+                let implIdx = seekReadImplementationIdx &addr
+                (offset, flags, nameIdx, implIdx)
 
             /// Read Table Nested
             let seekReadNestedRow idx =
                 let mutable addr = rowAddr ILTableNames.Nested idx
                 let nestedIdx = seekReadUntaggedIdx ILTableNames.TypeDef &addr
                 let enclIdx = seekReadUntaggedIdx ILTableNames.TypeDef &addr
-                (nestedIdx,enclIdx)
+                (nestedIdx, enclIdx)
 
             /// Read Table GenericParam
             let seekReadGenericParamRow idx =
@@ -5275,14 +5364,14 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let flags = seekReadUInt16Adv &addr
                 let ownerIdx = seekReadTypeOrMethodDefIdx &addr
                 let nameIdx = seekReadStringIdx &addr
-                (idx,seq,flags,ownerIdx,nameIdx)
+                (idx, seq, flags, ownerIdx, nameIdx)
 
             // Read Table GenericParamConstraint
             let seekReadGenericParamConstraintRow idx =
                 let mutable addr = rowAddr ILTableNames.GenericParamConstraint idx
                 let pidx = seekReadUntaggedIdx ILTableNames.GenericParam &addr
                 let constraintIdx = seekReadTypeDefOrRefOrSpecIdx &addr
-                (pidx,constraintIdx)
+                (pidx, constraintIdx)
 
             //let readUserStringHeapUncached idx = seekReadUserString is (userStringsStreamPhysicalLoc + idx)
             //let readUserStringHeap = cacheUserStringHeap readUserStringHeapUncached
@@ -5332,7 +5421,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 { Manifest =
                      if getNumRows (ILTableNames.Assembly) > 0 then Some (seekReadAssemblyManifest 1)
                      else None;
-                  CustomAttrs = seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.Module,idx));
+                  CustomAttrs = seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.Module, idx));
                   Name = ilModuleName;
                   //NativeResources=nativeResources;
                   TypeDefs = ILTypeDefs (lazy (seekReadTopTypeDefs ()));
@@ -5350,19 +5439,19 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                   VirtualAlignment=0x2000
                   ImageBase=0x034f0000
                   MetadataVersion=""
-                  Resources = ILResources (Lazy<_>.CreateFromValue [| |])
+                  Resources = seekReadManifestResources ()
                   }
 
             and seekReadAssemblyManifest idx =
-                let (hash,v1,v2,v3,v4,flags,publicKeyIdx, nameIdx, localeIdx) = seekReadAssemblyRow idx
+                let (hash, v1, v2, v3, v4, flags, publicKeyIdx, nameIdx, localeIdx) = seekReadAssemblyRow idx
                 let name = readStringHeap nameIdx
                 let pubkey = readBlobHeapOption publicKeyIdx
                 { Name= name;
                   AuxModuleHashAlgorithm=hash
                   PublicKey= pubkey
-                  Version= USome (Version(int v1,int v2,int v3,int v4))
+                  Version= USome (Version(int v1, int v2, int v3, int v4))
                   Locale= readStringHeapOption localeIdx
-                  CustomAttrs = seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.Assembly,idx))
+                  CustomAttrs = seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.Assembly, idx))
                   ExportedTypes= seekReadTopExportedTypes ()
                   EntrypointElsewhere=None
                   Retargetable = 0 <> (flags &&& 0x100);
@@ -5373,7 +5462,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
             and seekReadAssemblyRef idx = cacheAssemblyRef  seekReadAssemblyRefUncached idx
             and seekReadAssemblyRefUncached idx =
-                let (v1,v2,v3,v4,flags,publicKeyOrTokenIdx, nameIdx, localeIdx,hashValueIdx) = seekReadAssemblyRefRow idx
+                let (v1, v2, v3, v4, flags, publicKeyOrTokenIdx, nameIdx, localeIdx, hashValueIdx) = seekReadAssemblyRefRow idx
                 let nm = readStringHeap nameIdx
                 let publicKey =
                     match readBlobHeapOption publicKeyOrTokenIdx with
@@ -5385,7 +5474,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                      hash=readBlobHeapOption hashValueIdx,
                      publicKey=publicKey,
                      retargetable=((flags &&& 0x0100) <> 0x0),
-                     version=USome(Version(int v1,int v2,int v3,int v4)),
+                     version=USome(Version(int v1, int v2, int v3, int v4)),
                      locale=readStringHeapOption localeIdx;)
 
             and seekReadModuleRef idx =
@@ -5399,9 +5488,9 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                             hash= readBlobHeapOption hashValueIdx)
 
             and seekReadClassLayout idx =
-                match seekReadOptionalIndexedRow (getNumRows ILTableNames.ClassLayout,seekReadClassLayoutRow,(fun (_,_,tidx) -> tidx),simpleIndexCompare idx,isSorted ILTableNames.ClassLayout,(fun (pack,size,_) -> pack,size)) with
+                match seekReadOptionalIndexedRow (getNumRows ILTableNames.ClassLayout, seekReadClassLayoutRow, (fun (_, _, tidx) -> tidx), simpleIndexCompare idx, isSorted ILTableNames.ClassLayout, (fun (pack, size, _) -> pack, size)) with
                 | None -> { Size = None; Pack = None }
-                | Some (pack,size) -> { Size = Some size; Pack = Some pack; }
+                | Some (pack, size) -> { Size = Some size; Pack = Some pack; }
 
 
             and typeLayoutOfFlags flags tidx =
@@ -5415,10 +5504,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                  ILTypeDefAccess.OfFlags flags =  ILTypeDefAccess.Public
 
             and seekIsTopTypeDefOfIdx idx =
-                let (flags,_,_, _, _,_) = seekReadTypeDefRow idx
+                let (flags, _, _, _, _, _) = seekReadTypeDefRow idx
                 isTopTypeDef flags
 
-            and readStringHeapAsTypeName (nameIdx,namespaceIdx) =
+            and readStringHeapAsTypeName (nameIdx, namespaceIdx) =
                 let name = readStringHeap nameIdx
                 let nspace = readStringHeapOption namespaceIdx
                 nspace, name
@@ -5433,7 +5522,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
             and seekReadTypeDefRowWithExtents (idx:int) =
                 let info= seekReadTypeDefRow idx
-                info,seekReadTypeDefRowExtents info idx
+                info, seekReadTypeDefRowExtents info idx
 
             and seekReadTypeDef toponly (idx:int) =
                 let (flags, nameIdx, namespaceIdx, _, _, _) = seekReadTypeDefRow idx
@@ -5444,25 +5533,25 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                  let nspace = readStringHeapOption namespaceIdx
                  let rest =
                     lazy
-                       let ((flags,nameIdx,namespaceIdx, extendsIdx, fieldsIdx, methodsIdx) as info) = seekReadTypeDefRow idx
+                       let ((flags, nameIdx, namespaceIdx, extendsIdx, fieldsIdx, methodsIdx) as info) = seekReadTypeDefRow idx
                        let name = readStringHeap nameIdx
                        let nspace = readStringHeapOption namespaceIdx
                        let (endFieldsIdx, endMethodsIdx) = seekReadTypeDefRowExtents info idx
-                       let typars = seekReadGenericParams 0 (TypeOrMethodDefTag.TypeDef,idx)
+                       let typars = seekReadGenericParams 0 (TypeOrMethodDefTag.TypeDef, idx)
                        let numtypars = typars.Length
                        let super = seekReadOptionalTypeDefOrRef numtypars AsObject extendsIdx
                        let layout = typeLayoutOfFlags flags idx
                        //let hasLayout = (match layout with ILTypeDefLayout.Explicit _ -> true | _ -> false)
                        let hasLayout = false
                        let mdefs = seekReadMethods numtypars methodsIdx endMethodsIdx
-                       let fdefs = seekReadFields (numtypars,hasLayout) fieldsIdx endFieldsIdx
+                       let fdefs = seekReadFields (numtypars, hasLayout) fieldsIdx endFieldsIdx
                        let nested = seekReadNestedTypeDefs idx
                        let intfs = seekReadInterfaceImpls numtypars idx
-                       //let sdecls =  seekReadSecurityDecls (TaggedIndex(hds_TypeDef,idx))
+                       //let sdecls =  seekReadSecurityDecls (TaggedIndex(hds_TypeDef, idx))
                        let mimpls = seekReadMethodImpls numtypars idx
                        let props = seekReadProperties numtypars idx
                        let events = seekReadEvents numtypars idx
-                       let cas = seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.TypeDef,idx))
+                       let cas = seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.TypeDef, idx))
                        { Namespace=nspace
                          Name=name
                          GenericParams=typars
@@ -5492,25 +5581,25 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             and seekReadNestedTypeDefs tidx =
                 ILTypeDefs
                   (lazy
-                       let nestedIdxs = seekReadIndexedRows (getNumRows ILTableNames.Nested,seekReadNestedRow,snd,simpleIndexCompare tidx,false,fst)
+                       let nestedIdxs = seekReadIndexedRows (getNumRows ILTableNames.Nested, seekReadNestedRow, snd, simpleIndexCompare tidx, false, fst)
                        [| for i in nestedIdxs do
                              match seekReadTypeDef false i with
                              | None -> ()
                              | Some td -> yield td |])
 
             and seekReadInterfaceImpls numtypars tidx =
-                seekReadIndexedRows (getNumRows ILTableNames.InterfaceImpl,seekReadInterfaceImplRow ,fst,simpleIndexCompare tidx,isSorted ILTableNames.InterfaceImpl,(snd >> seekReadTypeDefOrRef numtypars AsObject [| |]))
+                seekReadIndexedRows (getNumRows ILTableNames.InterfaceImpl, seekReadInterfaceImplRow , fst, simpleIndexCompare tidx, isSorted ILTableNames.InterfaceImpl, (snd >> seekReadTypeDefOrRef numtypars AsObject [| |]))
 
-            and seekReadGenericParams numtypars (a,b): ILGenericParameterDefs =
+            and seekReadGenericParams numtypars (a, b): ILGenericParameterDefs =
                 let pars =
                     seekReadIndexedRows
-                        (getNumRows ILTableNames.GenericParam,seekReadGenericParamRow,
-                         (fun (_,_,_,tomd,_) -> tomd),
-                         tomdCompare (TaggedIndex(a,b)),
+                        (getNumRows ILTableNames.GenericParam, seekReadGenericParamRow,
+                         (fun (_, _, _, tomd, _) -> tomd),
+                         tomdCompare (TaggedIndex(a, b)),
                          isSorted ILTableNames.GenericParam,
-                         (fun (gpidx,seq,flags,_,nameIdx) ->
+                         (fun (gpidx, seq, flags, _, nameIdx) ->
                              let constraints = seekReadGenericParamConstraintsUncached numtypars gpidx
-                             let cas = seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.GenericParam,gpidx))
+                             let cas = seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.GenericParam, gpidx))
                              seq, {Name=readStringHeap nameIdx
                                    Constraints= constraints
                                    CustomAttrs=cas
@@ -5527,48 +5616,48 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                      isSorted ILTableNames.GenericParamConstraint,
                      (snd >>  seekReadTypeDefOrRef numtypars AsObject (*ok*) [| |]))
 
-            and seekReadTypeDefAsType boxity (ginst:ILTypes) idx = cacheTypeDefAsType seekReadTypeDefAsTypeUncached (TypeDefAsTypIdx (boxity,ginst,idx))
+            and seekReadTypeDefAsType boxity (ginst:ILTypes) idx = cacheTypeDefAsType seekReadTypeDefAsTypeUncached (TypeDefAsTypIdx (boxity, ginst, idx))
 
-            and seekReadTypeDefAsTypeUncached (TypeDefAsTypIdx (boxity,ginst,idx)) =
+            and seekReadTypeDefAsTypeUncached (TypeDefAsTypIdx (boxity, ginst, idx)) =
                 mkILTy boxity (ILTypeSpec(seekReadTypeDefAsTypeRef idx, ginst))
 
             and seekReadTypeDefAsTypeRef idx =
                  let enc =
                    if seekIsTopTypeDefOfIdx idx then ILTypeRefScope.Top ILScopeRef.Local
                    else
-                     let enclIdx = seekReadIndexedRow (getNumRows ILTableNames.Nested,seekReadNestedRow,fst,simpleIndexCompare idx,isSorted ILTableNames.Nested,snd)
+                     let enclIdx = seekReadIndexedRow (getNumRows ILTableNames.Nested, seekReadNestedRow, fst, simpleIndexCompare idx, isSorted ILTableNames.Nested, snd)
                      let tref = seekReadTypeDefAsTypeRef enclIdx
                      ILTypeRefScope.Nested tref
                  let (_, nameIdx, namespaceIdx, _, _, _) = seekReadTypeDefRow idx
-                 let nsp, nm = readStringHeapAsTypeName (nameIdx,namespaceIdx)
+                 let nsp, nm = readStringHeapAsTypeName (nameIdx, namespaceIdx)
                  ILTypeRef(enc=enc, nsp = nsp, name = nm )
 
             and seekReadTypeRef idx = cacheTypeRef seekReadTypeRefUncached idx
             and seekReadTypeRefUncached idx =
-                 let scopeIdx,nameIdx,namespaceIdx = seekReadTypeRefRow idx
+                 let scopeIdx, nameIdx, namespaceIdx = seekReadTypeRefRow idx
                  let enc = seekReadTypeRefScope scopeIdx
-                 let nsp, nm = readStringHeapAsTypeName (nameIdx,namespaceIdx)
+                 let nsp, nm = readStringHeapAsTypeName (nameIdx, namespaceIdx)
                  ILTypeRef(enc, nsp, nm)
 
-            and seekReadTypeRefAsType boxity ginst idx = cacheTypeRefAsType seekReadTypeRefAsTypeUncached (TypeRefAsTypIdx (boxity,ginst,idx))
-            and seekReadTypeRefAsTypeUncached (TypeRefAsTypIdx (boxity,ginst,idx)) =
+            and seekReadTypeRefAsType boxity ginst idx = cacheTypeRefAsType seekReadTypeRefAsTypeUncached (TypeRefAsTypIdx (boxity, ginst, idx))
+            and seekReadTypeRefAsTypeUncached (TypeRefAsTypIdx (boxity, ginst, idx)) =
                  mkILTy boxity (ILTypeSpec(seekReadTypeRef idx, ginst))
 
-            and seekReadTypeDefOrRef numtypars boxity (ginst:ILTypes) (TaggedIndex(tag,idx) ) =
+            and seekReadTypeDefOrRef numtypars boxity (ginst:ILTypes) (TaggedIndex(tag, idx) ) =
                 match tag with
                 | tag when tag = TypeDefOrRefOrSpecTag.TypeDef -> seekReadTypeDefAsType boxity ginst idx
                 | tag when tag = TypeDefOrRefOrSpecTag.TypeRef -> seekReadTypeRefAsType boxity ginst idx
                 | tag when tag = TypeDefOrRefOrSpecTag.TypeSpec -> readBlobHeapAsType numtypars (seekReadTypeSpecRow idx)
                 | _ -> failwith "seekReadTypeDefOrRef"
 
-            and seekReadTypeDefOrRefAsTypeRef (TaggedIndex(tag,idx) ) =
+            and seekReadTypeDefOrRefAsTypeRef (TaggedIndex(tag, idx) ) =
                 match tag with
                 | tag when tag = TypeDefOrRefOrSpecTag.TypeDef -> seekReadTypeDefAsTypeRef idx
                 | tag when tag = TypeDefOrRefOrSpecTag.TypeRef -> seekReadTypeRef idx
                 | tag when tag = TypeDefOrRefOrSpecTag.TypeSpec -> ilg.typ_Object.TypeRef
                 | _ -> failwith "seekReadTypeDefOrRefAsTypeRef_readTypeDefOrRefOrSpec"
 
-            and seekReadMethodRefParent numtypars (TaggedIndex(tag,idx)) =
+            and seekReadMethodRefParent numtypars (TaggedIndex(tag, idx)) =
                 match tag with
                 | tag when tag = MemberRefParentTag.TypeRef -> seekReadTypeRefAsType AsObject (* not ok - no way to tell if a member ref parent is a value type or not *) [| |] idx
                 | tag when tag = MemberRefParentTag.ModuleRef -> mkILTypeForGlobalFunctions (ILScopeRef.Module (seekReadModuleRef idx))
@@ -5593,7 +5682,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let (VarArgMethodData(enclTyp, cc, nm, argtys, varargs, retty, minst)) =     seekReadMethodDefOrRef numtypars x
                 MethodData(enclTyp, cc, nm, argtys, retty, minst)
 
-            and seekReadCustomAttrType (TaggedIndex(tag,idx) ) =
+            and seekReadCustomAttrType (TaggedIndex(tag, idx) ) =
                 match tag with
                 | tag when tag = CustomAttributeTypeTag.MethodDef ->
                     let (MethodData(enclTyp, cc, nm, argtys, retty, minst)) = seekReadMethodDefAsMethodData idx
@@ -5603,7 +5692,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     mkILMethSpecInTyRaw (enclTyp, cc, nm, argtys, retty, minst)
                 | _ -> failwith "seekReadCustomAttrType"
 
-            and seekReadImplAsScopeRef (TaggedIndex(tag,idx) ) =
+            and seekReadImplAsScopeRef (TaggedIndex(tag, idx) ) =
                  if idx = 0 then ILScopeRef.Local
                  else
                    match tag with
@@ -5612,7 +5701,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                    | tag when tag = ImplementationTag.ExportedType -> failwith "seekReadImplAsScopeRef"
                    | _ -> failwith "seekReadImplAsScopeRef"
 
-            and seekReadTypeRefScope (TaggedIndex(tag,idx) ): ILTypeRefScope =
+            and seekReadTypeRefScope (TaggedIndex(tag, idx) ): ILTypeRefScope =
                 match tag with
                 | tag when tag = ResolutionScopeTag.Module -> ILTypeRefScope.Top(ILScopeRef.Local)
                 | tag when tag = ResolutionScopeTag.ModuleRef -> ILTypeRefScope.Top(ILScopeRef.Module (seekReadModuleRef idx))
@@ -5625,30 +5714,30 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 else Some (seekReadTypeDefOrRef numtypars boxity [| |] idx)
 
             and seekReadField (numtypars, hasLayout) (idx:int) =
-                 let (flags,nameIdx,typeIdx) = seekReadFieldRow idx
+                 let (flags, nameIdx, typeIdx) = seekReadFieldRow idx
                  let nm = readStringHeap nameIdx
                  let isStatic = (flags &&& 0x0010) <> 0
                  { Name = nm
                    FieldType = readBlobHeapAsFieldSig numtypars typeIdx
-                   LiteralValue = if (flags &&& 0x8000) = 0 then None else Some (seekReadConstant (TaggedIndex(HasConstantTag.FieldDef,idx)))
+                   LiteralValue = if (flags &&& 0x8000) = 0 then None else Some (seekReadConstant (TaggedIndex(HasConstantTag.FieldDef, idx)))
                    //Marshal =
                    //      if (flags &&& 0x1000) = 0 then None else
-                   //      Some (seekReadIndexedRow (getNumRows ILTableNames.FieldMarshal,seekReadFieldMarshalRow,
-                   //                                fst,hfmCompare (TaggedIndex(hfm_FieldDef,idx)),
+                   //      Some (seekReadIndexedRow (getNumRows ILTableNames.FieldMarshal, seekReadFieldMarshalRow,
+                   //                                fst, hfmCompare (TaggedIndex(hfm_FieldDef, idx)),
                    //                                isSorted ILTableNames.FieldMarshal,
                    //                                (snd >> readBlobHeapAsNativeType ctxt)))
                    //Data =
                    //      if (flags &&& 0x0100) = 0 then None
                    //      else
-                   //        let rva = seekReadIndexedRow (getNumRows ILTableNames.FieldRVA,seekReadFieldRVARow,
-                   //                                      snd,simpleIndexCompare idx,isSorted ILTableNames.FieldRVA,fst)
+                   //        let rva = seekReadIndexedRow (getNumRows ILTableNames.FieldRVA, seekReadFieldRVARow,
+                   //                                      snd, simpleIndexCompare idx, isSorted ILTableNames.FieldRVA, fst)
                    //        Some (rvaToData "field" rva)
                    Attributes = enum<FieldAttributes>(flags)
                    Offset =
                          if hasLayout && not isStatic then
-                             Some (seekReadIndexedRow (getNumRows ILTableNames.FieldLayout,seekReadFieldLayoutRow,
-                                                       snd,simpleIndexCompare idx,isSorted ILTableNames.FieldLayout,fst)) else None
-                   CustomAttrs=seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.FieldDef,idx))
+                             Some (seekReadIndexedRow (getNumRows ILTableNames.FieldLayout, seekReadFieldLayoutRow,
+                                                       snd, simpleIndexCompare idx, isSorted ILTableNames.FieldLayout, fst)) else None
+                   CustomAttrs=seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.FieldDef, idx))
                    Token = idx }
 
             and seekReadFields (numtypars, hasLayout) fidx1 fidx2 =
@@ -5666,12 +5755,12 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             and sigptrGetTypeDefOrRefOrSpecIdx bytes sigptr =
                 let n, sigptr = sigptrGetZInt32 bytes sigptr
                 if (n &&& 0x01) = 0x0 then (* Type Def *)
-                    TaggedIndex(TypeDefOrRefOrSpecTag.TypeDef,  (n >>>& 2)), sigptr
+                    TaggedIndex(TypeDefOrRefOrSpecTag.TypeDef, (n >>>& 2)), sigptr
                 else (* Type Ref *)
-                    TaggedIndex(TypeDefOrRefOrSpecTag.TypeRef,  (n >>>& 2)), sigptr
+                    TaggedIndex(TypeDefOrRefOrSpecTag.TypeRef, (n >>>& 2)), sigptr
 
             and sigptrGetTy numtypars bytes sigptr =
-                let b0,sigptr = sigptrGetByte bytes sigptr
+                let b0, sigptr = sigptrGetByte bytes sigptr
                 if b0 = et_OBJECT then ilg.typ_Object , sigptr
                 elif b0 = et_STRING then ilg.typ_String, sigptr
                 elif b0 = et_I1 then ilg.typ_SByte, sigptr
@@ -5689,10 +5778,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 elif b0 = et_CHAR then ilg.typ_Char, sigptr
                 elif b0 = et_BOOLEAN then ilg.typ_Boolean, sigptr
                 elif b0 = et_WITH then
-                    let b0,sigptr = sigptrGetByte bytes sigptr
+                    let b0, sigptr = sigptrGetByte bytes sigptr
                     let tdorIdx, sigptr = sigptrGetTypeDefOrRefOrSpecIdx bytes sigptr
                     let n, sigptr = sigptrGetZInt32 bytes sigptr
-                    let argtys,sigptr = sigptrFold (sigptrGetTy numtypars) n bytes sigptr
+                    let argtys, sigptr = sigptrFold (sigptrGetTy numtypars) n bytes sigptr
                     seekReadTypeDefOrRef numtypars (if b0 = et_CLASS then AsObject else AsValue) argtys tdorIdx,
                     sigptr
 
@@ -5704,7 +5793,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     seekReadTypeDefOrRef numtypars AsValue [| |] tdorIdx, sigptr
                 elif b0 = et_VAR then
                     let n, sigptr = sigptrGetZInt32 bytes sigptr
-                    ILType.Var n,sigptr
+                    ILType.Var n, sigptr
                 elif b0 = et_MVAR then
                     let n, sigptr = sigptrGetZInt32 bytes sigptr
                     ILType.Var (n + numtypars), sigptr
@@ -5741,13 +5830,13 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     let typ, sigptr = sigptrGetTy numtypars bytes sigptr
                     ILType.Modified((b0 = et_CMOD_REQD), seekReadTypeDefOrRefAsTypeRef tdorIdx, typ), sigptr
                 elif b0 = et_FNPTR then
-                    let ccByte,sigptr = sigptrGetByte bytes sigptr
-                    let generic,cc = byteAsCallConv ccByte
+                    let ccByte, sigptr = sigptrGetByte bytes sigptr
+                    let generic, cc = byteAsCallConv ccByte
                     if generic then failwith "fptr sig may not be generic"
-                    let numparams,sigptr = sigptrGetZInt32 bytes sigptr
-                    let retty,sigptr = sigptrGetTy numtypars bytes sigptr
-                    let argtys,sigptr = sigptrFold (sigptrGetTy numtypars) ( numparams) bytes sigptr
-                    ILType.FunctionPointer (ILCallingSignature(cc, argtys, retty)),sigptr
+                    let numparams, sigptr = sigptrGetZInt32 bytes sigptr
+                    let retty, sigptr = sigptrGetTy numtypars bytes sigptr
+                    let argtys, sigptr = sigptrFold (sigptrGetTy numtypars) ( numparams) bytes sigptr
+                    ILType.FunctionPointer (ILCallingSignature(cc, argtys, retty)), sigptr
                 elif b0 = et_SENTINEL then failwith "varargs NYI"
                 else ILType.Void , sigptr
 
@@ -5755,54 +5844,54 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 sigptrFold (sigptrGetTy numtypars) n bytes sigptr
 
             and sigptrGetArgTys n numtypars bytes sigptr acc =
-                if n <= 0 then (Array.ofList (List.rev acc),None),sigptr
+                if n <= 0 then (Array.ofList (List.rev acc), None), sigptr
                 else
-                  let b0,sigptr2 = sigptrGetByte bytes sigptr
+                  let b0, sigptr2 = sigptrGetByte bytes sigptr
                   if b0 = et_SENTINEL then
-                    let varargs,sigptr = sigptrGetVarArgTys n numtypars bytes sigptr2
-                    (Array.ofList (List.rev acc),Some( varargs)),sigptr
+                    let varargs, sigptr = sigptrGetVarArgTys n numtypars bytes sigptr2
+                    (Array.ofList (List.rev acc), Some( varargs)), sigptr
                   else
-                    let x,sigptr = sigptrGetTy numtypars bytes sigptr
+                    let x, sigptr = sigptrGetTy numtypars bytes sigptr
                     sigptrGetArgTys (n-1) numtypars bytes sigptr (x::acc)
 
-            and readBlobHeapAsMethodSig numtypars blobIdx = cacheBlobHeapAsMethodSig readBlobHeapAsMethodSigUncached (BlobAsMethodSigIdx (numtypars,blobIdx))
+            and readBlobHeapAsMethodSig numtypars blobIdx = cacheBlobHeapAsMethodSig readBlobHeapAsMethodSigUncached (BlobAsMethodSigIdx (numtypars, blobIdx))
 
-            and readBlobHeapAsMethodSigUncached (BlobAsMethodSigIdx (numtypars,blobIdx)) =
+            and readBlobHeapAsMethodSigUncached (BlobAsMethodSigIdx (numtypars, blobIdx)) =
                 let bytes = readBlobHeap blobIdx
                 let sigptr = 0
-                let ccByte,sigptr = sigptrGetByte bytes sigptr
-                let generic,cc = byteAsCallConv ccByte
-                let genarity,sigptr = if generic then sigptrGetZInt32 bytes sigptr else 0x0,sigptr
-                let numparams,sigptr = sigptrGetZInt32 bytes sigptr
-                let retty,sigptr = sigptrGetTy numtypars bytes sigptr
-                let (argtys,varargs),_sigptr = sigptrGetArgTys  ( numparams) numtypars bytes sigptr []
-                generic,genarity,cc,retty,argtys,varargs
+                let ccByte, sigptr = sigptrGetByte bytes sigptr
+                let generic, cc = byteAsCallConv ccByte
+                let genarity, sigptr = if generic then sigptrGetZInt32 bytes sigptr else 0x0, sigptr
+                let numparams, sigptr = sigptrGetZInt32 bytes sigptr
+                let retty, sigptr = sigptrGetTy numtypars bytes sigptr
+                let (argtys, varargs), _sigptr = sigptrGetArgTys  ( numparams) numtypars bytes sigptr []
+                generic, genarity, cc, retty, argtys, varargs
 
             and readBlobHeapAsType numtypars blobIdx =
                 let bytes = readBlobHeap blobIdx
-                let ty,_sigptr = sigptrGetTy numtypars bytes 0
+                let ty, _sigptr = sigptrGetTy numtypars bytes 0
                 ty
 
-            and readBlobHeapAsFieldSig numtypars blobIdx = cacheBlobHeapAsFieldSig readBlobHeapAsFieldSigUncached (BlobAsFieldSigIdx (numtypars,blobIdx))
+            and readBlobHeapAsFieldSig numtypars blobIdx = cacheBlobHeapAsFieldSig readBlobHeapAsFieldSigUncached (BlobAsFieldSigIdx (numtypars, blobIdx))
 
-            and readBlobHeapAsFieldSigUncached (BlobAsFieldSigIdx (numtypars,blobIdx)) =
+            and readBlobHeapAsFieldSigUncached (BlobAsFieldSigIdx (numtypars, blobIdx)) =
                 let bytes = readBlobHeap blobIdx
                 let sigptr = 0
-                let _ccByte,sigptr = sigptrGetByte bytes sigptr
-                let retty,_sigptr = sigptrGetTy numtypars bytes sigptr
+                let _ccByte, sigptr = sigptrGetByte bytes sigptr
+                let retty, _sigptr = sigptrGetTy numtypars bytes sigptr
                 retty
 
 
-            and readBlobHeapAsPropertySig numtypars blobIdx = cacheBlobHeapAsPropertySig readBlobHeapAsPropertySigUncached (BlobAsPropSigIdx (numtypars,blobIdx))
-            and readBlobHeapAsPropertySigUncached (BlobAsPropSigIdx (numtypars,blobIdx))  =
+            and readBlobHeapAsPropertySig numtypars blobIdx = cacheBlobHeapAsPropertySig readBlobHeapAsPropertySigUncached (BlobAsPropSigIdx (numtypars, blobIdx))
+            and readBlobHeapAsPropertySigUncached (BlobAsPropSigIdx (numtypars, blobIdx))  =
                 let bytes = readBlobHeap blobIdx
                 let sigptr = 0
-                let ccByte,sigptr = sigptrGetByte bytes sigptr
+                let ccByte, sigptr = sigptrGetByte bytes sigptr
                 let hasthis = byteAsHasThis ccByte
-                let numparams,sigptr = sigptrGetZInt32 bytes sigptr
-                let retty,sigptr = sigptrGetTy numtypars bytes sigptr
-                let argtys,_sigptr = sigptrFold (sigptrGetTy numtypars) ( numparams) bytes sigptr
-                hasthis,retty, argtys
+                let numparams, sigptr = sigptrGetZInt32 bytes sigptr
+                let retty, sigptr = sigptrGetTy numtypars bytes sigptr
+                let argtys, _sigptr = sigptrFold (sigptrGetTy numtypars) ( numparams) bytes sigptr
+                hasthis, retty, argtys
 
             and byteAsHasThis b =
                 let hasthis_masked = b &&& 0x60uy
@@ -5820,21 +5909,21 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     elif ccMaxked = e_IMAGE_CEE_CS_CALLCONV_VARARG then ILArgConvention.VarArg
                     else  ILArgConvention.Default
                 let generic = (b &&& e_IMAGE_CEE_CS_CALLCONV_GENERIC) <> 0x0uy
-                generic, Callconv (byteAsHasThis b,cc)
+                generic, Callconv (byteAsHasThis b, cc)
 
-            and seekReadMemberRefAsMethodData numtypars idx: VarArgMethodData =  cacheMemberRefAsMemberData  seekReadMemberRefAsMethodDataUncached (MemberRefAsMspecIdx (numtypars,idx))
+            and seekReadMemberRefAsMethodData numtypars idx: VarArgMethodData =  cacheMemberRefAsMemberData  seekReadMemberRefAsMethodDataUncached (MemberRefAsMspecIdx (numtypars, idx))
 
-            and seekReadMemberRefAsMethodDataUncached (MemberRefAsMspecIdx (numtypars,idx)) =
-                let (mrpIdx,nameIdx,typeIdx) = seekReadMemberRefRow idx
+            and seekReadMemberRefAsMethodDataUncached (MemberRefAsMspecIdx (numtypars, idx)) =
+                let (mrpIdx, nameIdx, typeIdx) = seekReadMemberRefRow idx
                 let nm = readStringHeap nameIdx
                 let enclTyp = seekReadMethodRefParent numtypars mrpIdx
-                let _generic,genarity,cc,retty,argtys,varargs = readBlobHeapAsMethodSig enclTyp.GenericArgs.Length typeIdx
+                let _generic, genarity, cc, retty, argtys, varargs = readBlobHeapAsMethodSig enclTyp.GenericArgs.Length typeIdx
                 let minst =  Array.init genarity (fun n -> ILType.Var (numtypars+n))
-                (VarArgMethodData(enclTyp, cc, nm, argtys, varargs,retty,minst))
+                (VarArgMethodData(enclTyp, cc, nm, argtys, varargs, retty, minst))
 
             and seekReadMemberRefAsMethDataNoVarArgs numtypars idx: MethodData =
-               let (VarArgMethodData(enclTyp, cc, nm, argtys, _varargs, retty,minst)) =  seekReadMemberRefAsMethodData numtypars idx
-               (MethodData(enclTyp, cc, nm, argtys, retty,minst))
+               let (VarArgMethodData(enclTyp, cc, nm, argtys, _varargs, retty, minst)) =  seekReadMemberRefAsMethodData numtypars idx
+               (MethodData(enclTyp, cc, nm, argtys, retty, minst))
 
             // One extremely annoying aspect of the MD format is that given a
             // ILMethodDef token it is non-trivial to find which ILTypeDef it belongs
@@ -5851,15 +5940,15 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                  seekReadIndexedRow (getNumRows ILTableNames.TypeDef,
                                         (fun i -> i, seekReadTypeDefRowWithExtents i),
                                         (fun r -> r),
-                                        (fun (_,((_, _, _, _, _, methodsIdx),
+                                        (fun (_, ((_, _, _, _, _, methodsIdx),
                                                   (_, endMethodsIdx)))  ->
                                                     if endMethodsIdx <= idx then 1
                                                     elif methodsIdx <= idx && idx < endMethodsIdx then 0
                                                     else -1),
-                                        true,fst)
-               let _generic,_genarity,cc,retty,argtys,_varargs = readBlobHeapAsMethodSig 0 typeIdx
-               let ctps = seekReadGenericParams 0 (TypeOrMethodDefTag.TypeDef,tidx)
-               let mtps = seekReadGenericParams ctps.Length (TypeOrMethodDefTag.MethodDef,idx)
+                                        true, fst)
+               let _generic, _genarity, cc, retty, argtys, _varargs = readBlobHeapAsMethodSig 0 typeIdx
+               let ctps = seekReadGenericParams 0 (TypeOrMethodDefTag.TypeDef, tidx)
+               let mtps = seekReadGenericParams ctps.Length (TypeOrMethodDefTag.MethodDef, idx)
                let finst = mkILFormalGenericArgs 0 ctps.Length
                let minst = mkILFormalGenericArgs ctps.Length mtps.Length
                let enclTyp = seekReadTypeDefAsType AsObject finst tidx
@@ -5868,25 +5957,25 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             and seekReadMethod numtypars (idx:int) =
                  let (_codeRVA, implflags, flags, nameIdx, typeIdx, paramIdx) = seekReadMethodRow idx
                  let nm = readStringHeap nameIdx
-                 let _generic,_genarity,cc,retty,argtys,_varargs = readBlobHeapAsMethodSig numtypars typeIdx
+                 let _generic, _genarity, cc, retty, argtys, _varargs = readBlobHeapAsMethodSig numtypars typeIdx
 
                  let endParamIdx =
                    if idx >= getNumRows ILTableNames.Method then
                      getNumRows ILTableNames.Param + 1
                    else
-                     let (_,_,_,_,_, paramIdx) = seekReadMethodRow (idx + 1)
+                     let (_, _, _, _, _, paramIdx) = seekReadMethodRow (idx + 1)
                      paramIdx
 
-                 let ret,ilParams = seekReadParams (retty,argtys) paramIdx endParamIdx
+                 let ret, ilParams = seekReadParams (retty, argtys) paramIdx endParamIdx
 
                  { Token=idx // This value is not a strict metadata token but it's good enough (if needed we could get the real one pretty easily)
                    Name=nm
                    Attributes = enum<System.Reflection.MethodAttributes>(flags)
-                   //SecurityDecls=seekReadSecurityDecls (TaggedIndex(hds_MethodDef,idx))
+                   //SecurityDecls=seekReadSecurityDecls (TaggedIndex(hds_MethodDef, idx))
                    //IsEntryPoint= (fst entryPointToken = ILTableNames.Method && snd entryPointToken = idx)
                    ImplAttributes= enum<MethodImplAttributes> implflags
-                   GenericParams=seekReadGenericParams numtypars (TypeOrMethodDefTag.MethodDef,idx)
-                   CustomAttrs=seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.MethodDef,idx))
+                   GenericParams=seekReadGenericParams numtypars (TypeOrMethodDefTag.MethodDef, idx)
+                   CustomAttrs=seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.MethodDef, idx))
                    Parameters= ilParams
                    CallingConv=cc
                    Return=ret
@@ -5897,7 +5986,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                  }
 
 
-            and seekReadParams (retty,argtys) pidx1 pidx2 =
+            and seekReadParams (retty, argtys) pidx1 pidx2 =
                 let retRes: ILReturn ref =  ref { (* Marshal=None *) Type=retty; CustomAttrs=ILCustomAttrsStatics.Empty }
                 let paramsRes =
                     argtys
@@ -5909,24 +5998,24 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                           ParameterType=ty
                           CustomAttrs=ILCustomAttrsStatics.Empty })
                 for i = pidx1 to pidx2 - 1 do
-                    seekReadParamExtras (retRes,paramsRes) i
+                    seekReadParamExtras (retRes, paramsRes) i
                 !retRes, paramsRes
 
-            and seekReadParamExtras (retRes,paramsRes) (idx:int) =
-               let (flags,seq,nameIdx) = seekReadParamRow idx
+            and seekReadParamExtras (retRes, paramsRes) (idx:int) =
+               let (flags, seq, nameIdx) = seekReadParamRow idx
                //let _hasMarshal = (flags &&& 0x2000) <> 0x0
                let hasDefault = (flags &&& 0x1000) <> 0x0
-               //let fmReader idx = seekReadIndexedRow (getNumRows ILTableNames.FieldMarshal,seekReadFieldMarshalRow,fst,hfmCompare idx,isSorted ILTableNames.FieldMarshal,(snd >> readBlobHeapAsNativeType ctxt))
-               let cas = seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.ParamDef,idx))
+               //let fmReader idx = seekReadIndexedRow (getNumRows ILTableNames.FieldMarshal, seekReadFieldMarshalRow, fst, hfmCompare idx, isSorted ILTableNames.FieldMarshal, (snd >> readBlobHeapAsNativeType ctxt))
+               let cas = seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.ParamDef, idx))
                if seq = 0 then
                    retRes := { !retRes with
-                                    //Marshal=(if hasMarshal then Some (fmReader (TaggedIndex(hfm_ParamDef,idx))) else None);
+                                    //Marshal=(if hasMarshal then Some (fmReader (TaggedIndex(hfm_ParamDef, idx))) else None);
                                     CustomAttrs = cas }
                else
                    paramsRes.[seq - 1] <-
                       { paramsRes.[seq - 1] with
-                           //Marshal=(if hasMarshal then Some (fmReader (TaggedIndex(hfm_ParamDef,idx))) else None)
-                           Default = (if hasDefault then USome (seekReadConstant (TaggedIndex(HasConstantTag.ParamDef,idx))) else UNone)
+                           //Marshal=(if hasMarshal then Some (fmReader (TaggedIndex(hfm_ParamDef, idx))) else None)
+                           Default = (if hasDefault then USome (seekReadConstant (TaggedIndex(HasConstantTag.ParamDef, idx))) else UNone)
                            Name = readStringHeapOption nameIdx
                            Attributes = enum<ParameterAttributes> flags
                            CustomAttrs = cas }
@@ -5934,27 +6023,27 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             and seekReadMethodImpls numtypars tidx =
                { new ILMethodImplDefs with
                   member __.Entries =
-                      let mimpls = seekReadIndexedRows (getNumRows ILTableNames.MethodImpl,seekReadMethodImplRow,(fun (a,_,_) -> a),simpleIndexCompare tidx,isSorted ILTableNames.MethodImpl,(fun (_,b,c) -> b,c))
-                      mimpls |> Array.map (fun (b,c) ->
+                      let mimpls = seekReadIndexedRows (getNumRows ILTableNames.MethodImpl, seekReadMethodImplRow, (fun (a, _, _) -> a), simpleIndexCompare tidx, isSorted ILTableNames.MethodImpl, (fun (_, b, c) -> b, c))
+                      mimpls |> Array.map (fun (b, c) ->
                           { OverrideBy=
-                              let (MethodData(enclTyp, cc, nm, argtys, retty,minst)) = seekReadMethodDefOrRefNoVarargs numtypars b
-                              mkILMethSpecInTyRaw (enclTyp, cc, nm, argtys, retty,minst);
+                              let (MethodData(enclTyp, cc, nm, argtys, retty, minst)) = seekReadMethodDefOrRefNoVarargs numtypars b
+                              mkILMethSpecInTyRaw (enclTyp, cc, nm, argtys, retty, minst);
                             Overrides=
-                              let (MethodData(enclTyp, cc, nm, argtys, retty,minst)) = seekReadMethodDefOrRefNoVarargs numtypars c
-                              let mspec = mkILMethSpecInTyRaw (enclTyp, cc, nm, argtys, retty,minst)
+                              let (MethodData(enclTyp, cc, nm, argtys, retty, minst)) = seekReadMethodDefOrRefNoVarargs numtypars c
+                              let mspec = mkILMethSpecInTyRaw (enclTyp, cc, nm, argtys, retty, minst)
                               OverridesSpec(mspec.MethodRef, mspec.EnclosingType) }) }
 
-            and seekReadMultipleMethodSemantics (flags,id) =
+            and seekReadMultipleMethodSemantics (flags, id) =
                 seekReadIndexedRows
                   (getNumRows ILTableNames.MethodSemantics ,
                    seekReadMethodSemanticsRow,
-                   (fun (_flags,_,c) -> c),
+                   (fun (_flags, _, c) -> c),
                    hsCompare id,
                    isSorted ILTableNames.MethodSemantics,
-                   (fun (a,b,_c) ->
+                   (fun (a, b, _c) ->
                        let (MethodData(enclTyp, cc, nm, argtys, retty, minst)) = seekReadMethodDefAsMethodData b
                        a, (mkILMethSpecInTyRaw (enclTyp, cc, nm, argtys, retty, minst)).MethodRef))
-                |> Array.filter (fun (flags2,_) -> flags = flags2)
+                |> Array.filter (fun (flags2, _) -> flags = flags2)
                 |> Array.map snd
 
 
@@ -5969,23 +6058,23 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 | Some x -> x
 
             and seekReadEvent _numtypars idx =
-               let (flags,nameIdx,_typIdx) = seekReadEventRow idx
+               let (flags, nameIdx, _typIdx) = seekReadEventRow idx
                { Name = readStringHeap nameIdx
                  //EventHandlerType = seekReadOptionalTypeDefOrRef numtypars AsObject typIdx
                  Attributes = enum<System.Reflection.EventAttributes>(flags)
-                 AddMethod= seekReadMethodSemantics (0x0008,TaggedIndex(HasSemanticsTag.Event, idx))
-                 RemoveMethod=seekReadMethodSemantics (0x0010,TaggedIndex(HasSemanticsTag.Event,idx))
-                 //FireMethod=seekReadOptionalMethodSemantics (0x0020,TaggedIndex(HasSemanticsTag.Event,idx))
+                 AddMethod= seekReadMethodSemantics (0x0008, TaggedIndex(HasSemanticsTag.Event, idx))
+                 RemoveMethod=seekReadMethodSemantics (0x0010, TaggedIndex(HasSemanticsTag.Event, idx))
+                 //FireMethod=seekReadOptionalMethodSemantics (0x0020, TaggedIndex(HasSemanticsTag.Event, idx))
                  //OtherMethods = seekReadMultipleMethodSemantics (0x0004, TaggedIndex(HasSemanticsTag.Event, idx))
-                 CustomAttrs=seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.Event,idx))
+                 CustomAttrs=seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.Event, idx))
                  Token = idx}
 
             and seekReadEvents numtypars tidx =
                { new ILEventDefs with
                     member __.Entries =
-                       match seekReadOptionalIndexedRow (getNumRows ILTableNames.EventMap,(fun i -> i, seekReadEventMapRow i),(fun (_,row) -> fst row),compare tidx,false,(fun (i,row) -> (i,snd row))) with
+                       match seekReadOptionalIndexedRow (getNumRows ILTableNames.EventMap, (fun i -> i, seekReadEventMapRow i), (fun (_, row) -> fst row), compare tidx, false, (fun (i, row) -> (i, snd row))) with
                        | None -> [| |]
-                       | Some (rowNum,beginEventIdx) ->
+                       | Some (rowNum, beginEventIdx) ->
                            let endEventIdx =
                                if rowNum >= getNumRows ILTableNames.EventMap then
                                    getNumRows ILTableNames.Event + 1
@@ -5997,10 +6086,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                                yield seekReadEvent numtypars i |] }
 
             and seekReadProperty numtypars idx =
-               let (flags,nameIdx,typIdx) = seekReadPropertyRow idx
-               let cc,retty,argtys = readBlobHeapAsPropertySig numtypars typIdx
-               let setter= seekReadOptionalMethodSemantics (0x0001,TaggedIndex(HasSemanticsTag.Property,idx))
-               let getter = seekReadOptionalMethodSemantics (0x0002,TaggedIndex(HasSemanticsTag.Property,idx))
+               let (flags, nameIdx, typIdx) = seekReadPropertyRow idx
+               let cc, retty, argtys = readBlobHeapAsPropertySig numtypars typIdx
+               let setter= seekReadOptionalMethodSemantics (0x0001, TaggedIndex(HasSemanticsTag.Property, idx))
+               let getter = seekReadOptionalMethodSemantics (0x0002, TaggedIndex(HasSemanticsTag.Property, idx))
                let cc2 =
                    match getter with
                    | Some mref -> mref.CallingConv.ThisConv
@@ -6014,17 +6103,17 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                  SetMethod=setter;
                  GetMethod=getter;
                  PropertyType=retty;
-                 Init= if (flags &&& 0x1000) = 0 then None else Some (seekReadConstant (TaggedIndex(HasConstantTag.Property,idx)));
+                 Init= if (flags &&& 0x1000) = 0 then None else Some (seekReadConstant (TaggedIndex(HasConstantTag.Property, idx)));
                  IndexParameterTypes=argtys;
-                 CustomAttrs=seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.Property,idx))
+                 CustomAttrs=seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.Property, idx))
                  Token = idx }
 
             and seekReadProperties numtypars tidx =
                { new ILPropertyDefs with
                   member __.Entries =
-                       match seekReadOptionalIndexedRow (getNumRows ILTableNames.PropertyMap,(fun i -> i, seekReadPropertyMapRow i),(fun (_,row) -> fst row),compare tidx,false,(fun (i,row) -> (i,snd row))) with
+                       match seekReadOptionalIndexedRow (getNumRows ILTableNames.PropertyMap, (fun i -> i, seekReadPropertyMapRow i), (fun (_, row) -> fst row), compare tidx, false, (fun (i, row) -> (i, snd row))) with
                        | None -> [| |]
-                       | Some (rowNum,beginPropIdx) ->
+                       | Some (rowNum, beginPropIdx) ->
                            let endPropIdx =
                                if rowNum >= getNumRows ILTableNames.PropertyMap then
                                    getNumRows ILTableNames.Property + 1
@@ -6039,12 +6128,12 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 { new ILCustomAttrs with
                    member __.Entries =
                        seekReadIndexedRows (getNumRows ILTableNames.CustomAttribute,
-                                              seekReadCustomAttributeRow,(fun (a,_,_) -> a),
+                                              seekReadCustomAttributeRow, (fun (a, _, _) -> a),
                                               hcaCompare idx,
                                               isSorted ILTableNames.CustomAttribute,
-                                              (fun (_,b,c) -> seekReadCustomAttr (b,c))) }
+                                              (fun (_, b, c) -> seekReadCustomAttr (b, c))) }
 
-            and seekReadCustomAttr (catIdx,valIdx) =
+            and seekReadCustomAttr (catIdx, valIdx) =
                 let data =
                     match readBlobHeapOption valIdx with
                     | USome bytes -> bytes
@@ -6059,25 +6148,25 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 (lazy
                      seekReadIndexedRows (getNumRows ILTableNames.Permission,
                                              seekReadPermissionRow,
-                                             (fun (_,par,_) -> par),
+                                             (fun (_, par, _) -> par),
                                              hdsCompare idx,
                                              isSorted ILTableNames.Permission,
-                                             (fun (act,_,ty) -> seekReadSecurityDecl (act,ty))))
+                                             (fun (act, _, ty) -> seekReadSecurityDecl (act, ty))))
 
-            and seekReadSecurityDecl (a,b) =
-                ctxt.seekReadSecurityDecl (SecurityDeclIdx (a,b))
+            and seekReadSecurityDecl (a, b) =
+                ctxt.seekReadSecurityDecl (SecurityDeclIdx (a, b))
 
-            and seekReadSecurityDeclUncached ctxtH (SecurityDeclIdx (act,ty)) =
+            and seekReadSecurityDeclUncached ctxtH (SecurityDeclIdx (act, ty)) =
                 PermissionSet ((if List.memAssoc (int act) (Lazy.force ILSecurityActionRevMap) then List.assoc (int act) (Lazy.force ILSecurityActionRevMap) else failwith "unknown security action"),
                                readBlobHeap ty)
 
             *)
 
             and seekReadConstant idx =
-              let kind,vidx = seekReadIndexedRow (getNumRows ILTableNames.Constant,
+              let kind, vidx = seekReadIndexedRow (getNumRows ILTableNames.Constant,
                                                   seekReadConstantRow,
-                                                  (fun (_,key,_) -> key),
-                                                  hcCompare idx,isSorted ILTableNames.Constant,(fun (kind,_,v) -> kind,v))
+                                                  (fun (_, key, _) -> key),
+                                                  hcCompare idx, isSorted ILTableNames.Constant, (fun (kind, _, v) -> kind, v))
               match kind with
               | x when x = uint16 et_STRING ->
                 let blobHeap = readBlobHeap vidx
@@ -6098,16 +6187,43 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
               | x when x = uint16 et_CLASS || x = uint16 et_OBJECT ->  null
               | _ -> null
 
+            and seekReadManifestResources () =
+                ILResources
+                  (lazy
+                     [| for i = 1 to getNumRows ILTableNames.ManifestResource do
+                         let (offset, flags, nameIdx, implIdx) = seekReadManifestResourceRow i
+                         let scoref = seekReadImplAsScopeRef implIdx
+                         let datalab =
+                           match scoref with
+                           | ILScopeRef.Local ->
+                                ILResourceLocation.Local (fun () ->
+                                    // We re-crack the PE file on each resource read, which is a bit dodgy
+                                    let bytes = File.ReadAllBytes fileName
+                                    let is = ByteFile(bytes)
+                                    let pe = PEReader(fileName, is)
+                                    let start = pe.ResourcePhysLoc offset
+                                    let len = seekReadInt32 is start
+                                    seekReadBytes is (start + 4) len)
+                           | ILScopeRef.Module mref -> ILResourceLocation.File (mref, offset)
+                           | ILScopeRef.Assembly aref -> ILResourceLocation.Assembly aref
+
+                         let r =
+                           { Name= readStringHeap nameIdx;
+                             Location = datalab;
+                             Access = (if (flags &&& 0x01) <> 0x0 then ILResourceAccess.Public else ILResourceAccess.Private);
+                             CustomAttrs =  seekReadCustomAttrs (TaggedIndex(HasCustomAttributeTag.ManifestResource, i)) }
+                         yield r |])
+
             and seekReadNestedExportedTypes parentIdx =
                 ILNestedExportedTypesAndForwarders
                   (lazy
                      [| for i = 1 to getNumRows ILTableNames.ExportedType do
-                           let (flags,_tok,nameIdx,namespaceIdx,implIdx) = seekReadExportedTypeRow i
+                           let (flags, _tok, nameIdx, namespaceIdx, implIdx) = seekReadExportedTypeRow i
                            if not (isTopTypeDef flags) then
-                               let (TaggedIndex(tag,idx) ) = implIdx
+                               let (TaggedIndex(tag, idx) ) = implIdx
                                match tag with
                                | tag when tag = ImplementationTag.ExportedType && idx = parentIdx  ->
-                                   let _nsp, nm = readStringHeapAsTypeName (nameIdx,namespaceIdx)
+                                   let _nsp, nm = readStringHeapAsTypeName (nameIdx, namespaceIdx)
                                    yield
                                      { Name=nm
                                        Access=(match ILTypeDefAccess.OfFlags flags with ILTypeDefAccess.Nested n -> n | _ -> failwith "non-nested access for a nested type described as being in an auxiliary module")
@@ -6119,13 +6235,13 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 ILExportedTypesAndForwarders
                   (lazy
                      [| for i = 1 to getNumRows ILTableNames.ExportedType do
-                         let (flags,_tok,nameIdx,namespaceIdx,implIdx) = seekReadExportedTypeRow i
+                         let (flags, _tok, nameIdx, namespaceIdx, implIdx) = seekReadExportedTypeRow i
                          if isTopTypeDef flags then
-                           let (TaggedIndex(tag,_idx) ) = implIdx
+                           let (TaggedIndex(tag, _idx) ) = implIdx
 
                            // the nested types will be picked up by their enclosing types
                            if tag <> ImplementationTag.ExportedType then
-                               let nsp, nm = readStringHeapAsTypeName (nameIdx,namespaceIdx)
+                               let nsp, nm = readStringHeapAsTypeName (nameIdx, namespaceIdx)
 
                                let scoref = seekReadImplAsScopeRef implIdx
 
@@ -6151,65 +6267,65 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             int bytes.[sigptr], sigptr + 1
 
         let sigptr_get_u8 bytes sigptr =
-            let b0,sigptr = sigptr_get_byte bytes sigptr
-            byte b0,sigptr
+            let b0, sigptr = sigptr_get_byte bytes sigptr
+            byte b0, sigptr
 
         let sigptr_get_bool bytes sigptr =
-            let b0,sigptr = sigptr_get_byte bytes sigptr
-            (b0 = 0x01) ,sigptr
+            let b0, sigptr = sigptr_get_byte bytes sigptr
+            (b0 = 0x01) , sigptr
 
         let sigptr_get_i8 bytes sigptr =
-            let i,sigptr = sigptr_get_u8 bytes sigptr
-            sbyte i,sigptr
+            let i, sigptr = sigptr_get_u8 bytes sigptr
+            sbyte i, sigptr
 
         let sigptr_get_u16 bytes sigptr =
-            let b0,sigptr = sigptr_get_byte bytes sigptr
-            let b1,sigptr = sigptr_get_byte bytes sigptr
-            uint16 (b0 ||| (b1 <<< 8)),sigptr
+            let b0, sigptr = sigptr_get_byte bytes sigptr
+            let b1, sigptr = sigptr_get_byte bytes sigptr
+            uint16 (b0 ||| (b1 <<< 8)), sigptr
 
         let sigptr_get_i16 bytes sigptr =
-            let u,sigptr = sigptr_get_u16 bytes sigptr
-            int16 u,sigptr
+            let u, sigptr = sigptr_get_u16 bytes sigptr
+            int16 u, sigptr
 
         let sigptr_get_i32 bytes sigptr =
-            let b0,sigptr = sigptr_get_byte bytes sigptr
-            let b1,sigptr = sigptr_get_byte bytes sigptr
-            let b2,sigptr = sigptr_get_byte bytes sigptr
-            let b3,sigptr = sigptr_get_byte bytes sigptr
-            b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24),sigptr
+            let b0, sigptr = sigptr_get_byte bytes sigptr
+            let b1, sigptr = sigptr_get_byte bytes sigptr
+            let b2, sigptr = sigptr_get_byte bytes sigptr
+            let b3, sigptr = sigptr_get_byte bytes sigptr
+            b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24), sigptr
 
         let sigptr_get_u32 bytes sigptr =
-            let u,sigptr = sigptr_get_i32 bytes sigptr
-            uint32 u,sigptr
+            let u, sigptr = sigptr_get_i32 bytes sigptr
+            uint32 u, sigptr
 
         let sigptr_get_i64 bytes sigptr =
-            let b0,sigptr = sigptr_get_byte bytes sigptr
-            let b1,sigptr = sigptr_get_byte bytes sigptr
-            let b2,sigptr = sigptr_get_byte bytes sigptr
-            let b3,sigptr = sigptr_get_byte bytes sigptr
-            let b4,sigptr = sigptr_get_byte bytes sigptr
-            let b5,sigptr = sigptr_get_byte bytes sigptr
-            let b6,sigptr = sigptr_get_byte bytes sigptr
-            let b7,sigptr = sigptr_get_byte bytes sigptr
+            let b0, sigptr = sigptr_get_byte bytes sigptr
+            let b1, sigptr = sigptr_get_byte bytes sigptr
+            let b2, sigptr = sigptr_get_byte bytes sigptr
+            let b3, sigptr = sigptr_get_byte bytes sigptr
+            let b4, sigptr = sigptr_get_byte bytes sigptr
+            let b5, sigptr = sigptr_get_byte bytes sigptr
+            let b6, sigptr = sigptr_get_byte bytes sigptr
+            let b7, sigptr = sigptr_get_byte bytes sigptr
             int64 b0 ||| (int64 b1 <<< 8) ||| (int64 b2 <<< 16) ||| (int64 b3 <<< 24) |||
             (int64 b4 <<< 32) ||| (int64 b5 <<< 40) ||| (int64 b6 <<< 48) ||| (int64 b7 <<< 56),
             sigptr
 
         let sigptr_get_u64 bytes sigptr =
-            let u,sigptr = sigptr_get_i64 bytes sigptr
-            uint64 u,sigptr
+            let u, sigptr = sigptr_get_i64 bytes sigptr
+            uint64 u, sigptr
 
 
-        let ieee32_of_bits (x:int32) = System.BitConverter.ToSingle(System.BitConverter.GetBytes(x),0)
+        let ieee32_of_bits (x:int32) = System.BitConverter.ToSingle(System.BitConverter.GetBytes(x), 0)
         let ieee64_of_bits (x:int64) = System.BitConverter.Int64BitsToDouble(x)
 
         let sigptr_get_ieee32 bytes sigptr =
-            let u,sigptr = sigptr_get_i32 bytes sigptr
-            ieee32_of_bits u,sigptr
+            let u, sigptr = sigptr_get_i32 bytes sigptr
+            ieee32_of_bits u, sigptr
 
         let sigptr_get_ieee64 bytes sigptr =
-            let u,sigptr = sigptr_get_i64 bytes sigptr
-            ieee64_of_bits u,sigptr
+            let u, sigptr = sigptr_get_i64 bytes sigptr
+            ieee64_of_bits u, sigptr
 
         let u8AsBytes (i:byte) = [| i |]
         let u16AsBytes x =  let n = (int x) in [| b0 n; b1 n |]
@@ -6220,7 +6336,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         let i16AsBytes (i:int16) = u16AsBytes (uint16 i)
         let u32AsBytes (i:uint32) = i32AsBytes (int32 i)
         let u64AsBytes (i:uint64) = i64AsBytes (int64 i)
-        let bits_of_float32 (x:float32) = BitConverter.ToInt32(BitConverter.GetBytes(x),0)
+        let bits_of_float32 (x:float32) = BitConverter.ToInt32(BitConverter.GetBytes(x), 0)
         let bits_of_float (x:float) = BitConverter.DoubleToInt64Bits(x)
 
         let ieee32AsBytes i = i32AsBytes (bits_of_float32 i)
@@ -6335,7 +6451,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             let nnamed = propArgs.Length + fieldArgs.Length
             let data =
               [| yield! [| 0x01uy; 0x00uy; |]
-                 for (argty,fixedArg) in Seq.zip argtys fixedArgs do
+                 for (argty, fixedArg) in Seq.zip argtys fixedArgs do
                     yield! encodeCustomAttrValue argty fixedArg
                  yield! u16AsBytes (uint16 nnamed )
                  for arg in propArgs do
@@ -6345,7 +6461,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             //printfn "mkILCustomAttribMethRef, nnamed = %d, data.Length = %d, data = %A" nnamed data.Length data
             { Method = mspec;
               Data = data;
-              Elements = fixedArgs @ (propArgs |> List.map(fun (ILCustomAttrNamedArg(_,_,e)) -> e)) @ (fieldArgs |> List.map(fun (ILCustomAttrNamedArg(_,_,e)) -> e)) }
+              Elements = fixedArgs @ (propArgs |> List.map(fun (ILCustomAttrNamedArg(_, _, e)) -> e)) @ (fieldArgs |> List.map(fun (ILCustomAttrNamedArg(_, _, e)) -> e)) }
 
         let rec decodeCustomAttrElemType ilg bytes sigptr x =
             match x with
@@ -6364,8 +6480,8 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             | x when x = et_STRING -> ilg.typ_String, sigptr
             | x when x = et_OBJECT -> ilg.typ_Object, sigptr
             | x when x = et_SZARRAY ->
-                 let et,sigptr = sigptr_get_u8 bytes sigptr
-                 let elemTy,sigptr = decodeCustomAttrElemType ilg bytes sigptr et
+                 let et, sigptr = sigptr_get_u8 bytes sigptr
+                 let elemTy, sigptr = decodeCustomAttrElemType ilg bytes sigptr et
                  mkILArr1DTy elemTy, sigptr
             | x when x = 0x50uy -> ilg.typ_Type, sigptr
             | _ ->  failwithf "decodeCustomAttrElemType ilg: sigptr = %d, unrecognized custom element type: %A, bytes = %A" sigptr x bytes
@@ -6397,7 +6513,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 s
 
             // The format we accept is
-            // "<type name>{`<arity>[<type>,+]}{<array rank>}{<scope>}"  E.g.,
+            // "<type name>{`<arity>[<type>, +]}{<array rank>}{<scope>}"  E.g.,
             //
             // System.Collections.Generic.Dictionary
             //     `2[
@@ -6489,7 +6605,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     match specializations with
                     | None -> [| |]
                     | Some(genericArgs) -> genericArgs
-                let tspec = ILTypeSpec(tref,genericArgs)
+                let tspec = ILTypeSpec(tref, genericArgs)
                 let ilty =
                     match tspec.Name with
                     | "System.SByte"
@@ -6508,7 +6624,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
                 // if it's an array, wrap it - otherwise, just return the IL type
                 match rank with
-                | Some(r) -> ILType.Array(r,ilty)
+                | Some(r) -> ILType.Array(r, ilty)
                 | _ -> ilty
 
 
@@ -6519,74 +6635,74 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             res, sigptr + n
 
         let sigptr_get_string n bytes sigptr =
-            let intarray,sigptr = sigptr_get_bytes n bytes sigptr
+            let intarray, sigptr = sigptr_get_bytes n bytes sigptr
             Encoding.UTF8.GetString(intarray , 0, intarray.Length), sigptr
 
         let sigptr_get_serstring  bytes sigptr =
-            let len,sigptr = sigptrGetZInt32 bytes sigptr
+            let len, sigptr = sigptrGetZInt32 bytes sigptr
             sigptr_get_string len bytes sigptr
 
         let sigptr_get_serstring_possibly_null  bytes sigptr =
-            let b0,new_sigptr = sigptr_get_byte bytes sigptr
+            let b0, new_sigptr = sigptr_get_byte bytes sigptr
             if b0 = 0xFF then // null case
-                None,new_sigptr
+                None, new_sigptr
             else  // throw away  new_sigptr, getting length & text advance
-                let len,sigptr = sigptrGetZInt32 bytes sigptr
+                let len, sigptr = sigptrGetZInt32 bytes sigptr
                 let s, sigptr = sigptr_get_string len bytes sigptr
-                Some(s),sigptr
+                Some(s), sigptr
 
         let decodeILCustomAttribData ilg (ca: ILCustomAttribute) =
             let bytes = ca.Data
             let sigptr = 0
-            let bb0,sigptr = sigptr_get_byte bytes sigptr
-            let bb1,sigptr = sigptr_get_byte bytes sigptr
+            let bb0, sigptr = sigptr_get_byte bytes sigptr
+            let bb1, sigptr = sigptr_get_byte bytes sigptr
             if not (bb0 = 0x01 && bb1 = 0x00) then failwith "decodeILCustomAttribData: invalid data";
 
             let rec parseVal argty sigptr =
                 match argty with
                 | ILType.Value tspec when tspec.Namespace = USome "System" && tspec.Name = "SByte" ->
-                    let n,sigptr = sigptr_get_i8 bytes sigptr
+                    let n, sigptr = sigptr_get_i8 bytes sigptr
                     (argty, box n), sigptr
                 | ILType.Value tspec when tspec.Namespace = USome "System" && tspec.Name = "Byte" ->
-                    let n,sigptr = sigptr_get_u8 bytes sigptr
+                    let n, sigptr = sigptr_get_u8 bytes sigptr
                     (argty, box n), sigptr
                 | ILType.Value tspec when tspec.Namespace = USome "System" && tspec.Name = "Int16" ->
-                    let n,sigptr = sigptr_get_i16 bytes sigptr
+                    let n, sigptr = sigptr_get_i16 bytes sigptr
                     (argty, box n), sigptr
                 | ILType.Value tspec when tspec.Namespace = USome "System" && tspec.Name = "UInt16" ->
-                    let n,sigptr = sigptr_get_u16 bytes sigptr
+                    let n, sigptr = sigptr_get_u16 bytes sigptr
                     (argty, box n), sigptr
                 | ILType.Value tspec when tspec.Namespace = USome "System" && tspec.Name = "Int32" ->
-                    let n,sigptr = sigptr_get_i32 bytes sigptr
+                    let n, sigptr = sigptr_get_i32 bytes sigptr
                     (argty, box n), sigptr
                 | ILType.Value tspec when tspec.Namespace = USome "System" && tspec.Name = "UInt32" ->
-                    let n,sigptr = sigptr_get_u32 bytes sigptr
+                    let n, sigptr = sigptr_get_u32 bytes sigptr
                     (argty, box n), sigptr
                 | ILType.Value tspec when tspec.Namespace = USome "System" && tspec.Name = "Int64" ->
-                    let n,sigptr = sigptr_get_i64 bytes sigptr
+                    let n, sigptr = sigptr_get_i64 bytes sigptr
                     (argty, box n), sigptr
                 | ILType.Value tspec when tspec.Namespace = USome "System" && tspec.Name = "UInt64" ->
-                    let n,sigptr = sigptr_get_u64 bytes sigptr
+                    let n, sigptr = sigptr_get_u64 bytes sigptr
                     (argty, box n), sigptr
                 | ILType.Value tspec when tspec.Namespace = USome "System" && tspec.Name = "Double" ->
-                    let n,sigptr = sigptr_get_ieee64 bytes sigptr
+                    let n, sigptr = sigptr_get_ieee64 bytes sigptr
                     (argty, box n), sigptr
                 | ILType.Value tspec when tspec.Namespace = USome "System" && tspec.Name = "Single" ->
-                    let n,sigptr = sigptr_get_ieee32 bytes sigptr
+                    let n, sigptr = sigptr_get_ieee32 bytes sigptr
                     (argty, box n), sigptr
                 | ILType.Value tspec when tspec.Namespace = USome "System" && tspec.Name = "Char" ->
-                    let n,sigptr = sigptr_get_u16 bytes sigptr
+                    let n, sigptr = sigptr_get_u16 bytes sigptr
                     (argty, box (char n)), sigptr
                 | ILType.Value tspec when tspec.Namespace = USome "System" && tspec.Name = "Boolean" ->
-                    let n,sigptr = sigptr_get_byte bytes sigptr
+                    let n, sigptr = sigptr_get_byte bytes sigptr
                     (argty, box (not (n = 0))), sigptr
                 | ILType.Boxed tspec when tspec.Namespace = USome "System" && tspec.Name = "String" ->
                     //printfn "parsing string, sigptr = %d" sigptr
-                    let n,sigptr = sigptr_get_serstring_possibly_null bytes sigptr
+                    let n, sigptr = sigptr_get_serstring_possibly_null bytes sigptr
                     //printfn "got string, sigptr = %d" sigptr
                     (argty, box (match n with None -> null | Some s -> s)), sigptr
                 | ILType.Boxed tspec when tspec.Namespace = USome "System" && tspec.Name = "Type" ->
-                    let nOpt,sigptr = sigptr_get_serstring_possibly_null bytes sigptr
+                    let nOpt, sigptr = sigptr_get_serstring_possibly_null bytes sigptr
                     match nOpt with
                     | None -> (argty, box null) , sigptr // TODO: read System.Type attrs
                     | Some n ->
@@ -6597,49 +6713,49 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     with e ->
                         failwithf "decodeILCustomAttribData: error parsing type in custom attribute blob: %s" e.Message
                 | ILType.Boxed tspec when tspec.Namespace = USome "System" && tspec.Name = "Object" ->
-                    let et,sigptr = sigptr_get_u8 bytes sigptr
+                    let et, sigptr = sigptr_get_u8 bytes sigptr
                     if et = 0xFFuy then
                         (argty, null), sigptr
                     else
-                        let ty,sigptr = decodeCustomAttrElemType ilg bytes sigptr et
+                        let ty, sigptr = decodeCustomAttrElemType ilg bytes sigptr et
                         parseVal ty sigptr
-                | ILType.Array(shape,elemTy) when shape = ILArrayShape.SingleDimensional ->
-                    let n,sigptr = sigptr_get_i32 bytes sigptr
-                    if n = 0xFFFFFFFF then (argty, null),sigptr else
+                | ILType.Array(shape, elemTy) when shape = ILArrayShape.SingleDimensional ->
+                    let n, sigptr = sigptr_get_i32 bytes sigptr
+                    if n = 0xFFFFFFFF then (argty, null), sigptr else
                     let rec parseElems acc n sigptr =
                         if n = 0 then List.rev acc, sigptr else
-                        let v,sigptr = parseVal elemTy sigptr
+                        let v, sigptr = parseVal elemTy sigptr
                         parseElems (v ::acc) (n-1) sigptr
                     let elems, sigptr = parseElems [] n sigptr
                     let elems = elems |> List.map snd |> List.toArray
                     (argty, box elems), sigptr
                 | ILType.Value _ ->  (* assume it is an enumeration *)
-                    let n,sigptr = sigptr_get_i32 bytes sigptr
+                    let n, sigptr = sigptr_get_i32 bytes sigptr
                     (argty, box n), sigptr
                 | _ ->  failwith "decodeILCustomAttribData: attribute data involves an enum or System.Type value"
 
             let rec parseFixed argtys sigptr =
                 match argtys with
-                | [] -> [],sigptr
+                | [] -> [], sigptr
                 | h::t ->
-                    let nh,sigptr = parseVal h sigptr
-                    let nt,sigptr = parseFixed t sigptr
+                    let nh, sigptr = parseVal h sigptr
+                    let nt, sigptr = parseFixed t sigptr
                     nh ::nt, sigptr
 
-            let fixedArgs,sigptr = parseFixed (List.ofArray ca.Method.FormalArgTypes) sigptr
-            let nnamed,sigptr = sigptr_get_u16 bytes sigptr
+            let fixedArgs, sigptr = parseFixed (List.ofArray ca.Method.FormalArgTypes) sigptr
+            let nnamed, sigptr = sigptr_get_u16 bytes sigptr
             //printfn "nnamed = %d" nnamed
 
             try
             let rec parseNamed acc n sigptr =
                 if n = 0 then List.rev acc else
-                let isPropByte,sigptr = sigptr_get_u8 bytes sigptr
+                let isPropByte, sigptr = sigptr_get_u8 bytes sigptr
                 let isProp = (int isPropByte = 0x54)
-                let et,sigptr = sigptr_get_u8 bytes sigptr
+                let et, sigptr = sigptr_get_u8 bytes sigptr
                 // We have a named value
-                let ty,sigptr =
+                let ty, sigptr =
                     if ((* 0x50 = (int et) || *) 0x55 = (int et)) then
-                        let qualified_tname,sigptr = sigptr_get_serstring bytes sigptr
+                        let qualified_tname, sigptr = sigptr_get_serstring bytes sigptr
                         let unqualified_tname, rest =
                             let pieces = qualified_tname.Split(',')
                             if pieces.Length > 1 then
@@ -6654,17 +6770,17 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                         let nsp, nm = splitILTypeName unqualified_tname
                         let tref = ILTypeRef (scoref, nsp, nm)
                         let tspec = mkILNonGenericTySpec tref
-                        ILType.Value(tspec),sigptr
+                        ILType.Value(tspec), sigptr
                     else
                         decodeCustomAttrElemType ilg bytes sigptr et
-                let nm,sigptr = sigptr_get_serstring bytes sigptr
-                let (_,v),sigptr = parseVal ty sigptr
-                parseNamed ((nm,ty,isProp,v) :: acc) (n-1) sigptr
+                let nm, sigptr = sigptr_get_serstring bytes sigptr
+                let (_, v), sigptr = parseVal ty sigptr
+                parseNamed ((nm, ty, isProp, v) :: acc) (n-1) sigptr
             let named = parseNamed [] (int nnamed) sigptr
             fixedArgs, named
 
             with err ->
-              failwithf  "FAILED decodeILCustomAttribData, data.Length = %d, data = %A, meth = %A, argtypes = %A, fixedArgs=%A, nnamed = %A, sigptr before named = %A,  innerError = %A" bytes.Length bytes ca.Method.EnclosingType ca.Method.FormalArgTypes fixedArgs nnamed sigptr (err.ToString())
+              failwithf  "FAILED decodeILCustomAttribData, data.Length = %d, data = %A, meth = %A, argtypes = %A, fixedArgs=%A, nnamed = %A, sigptr before named = %A, innerError = %A" bytes.Length bytes ca.Method.EnclosingType ca.Method.FormalArgTypes fixedArgs nnamed sigptr (err.ToString())
 
         // Share DLLs within a provider by weak-caching them.
         let readerWeakCache = ConcurrentDictionary<(string * string), DateTime * WeakReference<ILModuleReader>>(HashIdentity.Structural)
@@ -6674,7 +6790,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         type File with
             static member ReadBinaryChunk (fileName: string, start, len) =
-                use stream = new FileStream(fileName,FileMode.Open,FileAccess.Read,FileShare.ReadWrite)
+                use stream = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)
                 stream.Seek(int64 start, SeekOrigin.Begin) |> ignore
                 let buffer = Array.zeroCreate len
                 let mutable n = 0
@@ -6855,10 +6971,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             member __.ContainsKey inp = tab.ContainsKey inp
 
 
-        let instParameterInfo inst (inp: ParameterInfo) =
+        let instParameterInfo typeBuilder inst (inp: ParameterInfo) =
             { new ParameterInfo() with
                 override __.Name = inp.Name
-                override __.ParameterType = inp.ParameterType |> instType inst
+                override __.ParameterType = inp.ParameterType |> instType typeBuilder inst
                 override __.Attributes = inp.Attributes
                 override __.RawDefaultValue = inp.RawDefaultValue
                 override __.GetCustomAttributesData() = inp.GetCustomAttributesData()
@@ -6939,7 +7055,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             lengthsEqAndForall2 ps1 ps2 (fun p1 p2 -> eqTypeAndILTypeWithInst inst2 p1.ParameterType p2.ParameterType)
 
 
-    type MethodSymbol2(gmd: MethodInfo, gargs: Type[]) =
+    type MethodSymbol2(gmd: MethodInfo, gargs: Type[], typeBuilder: ITypeBuilder) =
         inherit MethodInfo()
         let dty = gmd.DeclaringType
         let dinst = (if dty.IsGenericType then dty.GetGenericArguments() else [| |])
@@ -6949,16 +7065,16 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override __.DeclaringType = dty
         override __.MemberType = gmd.MemberType
 
-        override __.GetParameters() = gmd.GetParameters() |> Array.map (instParameterInfo (dinst, gargs))
+        override __.GetParameters() = gmd.GetParameters() |> Array.map (instParameterInfo typeBuilder (dinst, gargs))
         override __.CallingConvention = gmd.CallingConvention
-        override __.ReturnType = gmd.ReturnType |> instType (dinst, gargs)
+        override __.ReturnType = gmd.ReturnType |> instType typeBuilder (dinst, gargs)
         override __.GetGenericMethodDefinition() = gmd
         override __.IsGenericMethod = gmd.IsGenericMethod
         override __.GetGenericArguments() = gargs
         override __.MetadataToken = gmd.MetadataToken
 
         override __.GetCustomAttributesData() = gmd.GetCustomAttributesData()
-        override __.MakeGenericMethod(typeArgs) = MethodSymbol2(gmd, typeArgs) :> MethodInfo
+        override __.MakeGenericMethod(typeArgs) = MethodSymbol2(gmd, typeArgs, typeBuilder) :> MethodInfo
         override __.GetHashCode() = gmd.MetadataToken
         override this.Equals(that:obj) =
             match that with
@@ -6983,7 +7099,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
 
      /// Represents a constructor in an instantiated type
-    type ConstructorSymbol (declTy: Type, inp: ConstructorInfo) =
+    type ConstructorSymbol (declTy: Type, inp: ConstructorInfo, typeBuilder: ITypeBuilder) =
         inherit ConstructorInfo()
         let gps = ((if declTy.IsGenericType then declTy.GetGenericArguments() else [| |]), [| |])
 
@@ -6992,7 +7108,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override __.MemberType = MemberTypes.Constructor
         override __.DeclaringType = declTy
 
-        override __.GetParameters() = inp.GetParameters() |> Array.map (instParameterInfo gps)
+        override __.GetParameters() = inp.GetParameters() |> Array.map (instParameterInfo typeBuilder gps)
         override __.GetCustomAttributesData() = inp.GetCustomAttributesData()
         override __.MetadataToken = inp.MetadataToken
 
@@ -7012,10 +7128,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override this.GetCustomAttributes(attributeType, inherited) = inp.GetCustomAttributes(attributeType, inherited)
 
         override __.ToString() = sprintf "tgt constructor(...) in type %s" declTy.FullName
-        static member Make (declTy: Type) md = ConstructorSymbol (declTy, md) :> ConstructorInfo
+        static member Make (typeBuilder: ITypeBuilder) (declTy: Type) md = ConstructorSymbol (declTy, md, typeBuilder) :> ConstructorInfo
 
      /// Represents a method in an instantiated type
-    type MethodSymbol (declTy: Type, inp: MethodInfo) =
+    type MethodSymbol (declTy: Type, inp: MethodInfo, typeBuilder: ITypeBuilder) =
         inherit MethodInfo()
         let gps1 = (if declTy.IsGenericType then declTy.GetGenericArguments() else [| |])
         let gps2 = inp.GetGenericArguments()
@@ -7025,9 +7141,9 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override __.DeclaringType = declTy
         override __.MemberType = inp.MemberType
         override __.Attributes = inp.Attributes
-        override __.GetParameters() = inp.GetParameters() |> Array.map (instParameterInfo gps)
+        override __.GetParameters() = inp.GetParameters() |> Array.map (instParameterInfo typeBuilder gps)
         override __.CallingConvention = inp.CallingConvention
-        override __.ReturnType = inp.ReturnType |> instType gps
+        override __.ReturnType = inp.ReturnType |> instType typeBuilder gps
         override __.GetCustomAttributesData() = inp.GetCustomAttributesData()
         override __.GetGenericArguments() = gps2
         override __.IsGenericMethod = (gps2.Length <> 0)
@@ -7039,7 +7155,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             | :? MethodInfo as that -> this.MetadataToken = that.MetadataToken && eqTypes this.DeclaringType that.DeclaringType
             | _ -> false
 
-        override this.MakeGenericMethod(args) = MethodSymbol2(this, args) :> MethodInfo
+        override this.MakeGenericMethod(args) = MethodSymbol2(this, args, typeBuilder) :> MethodInfo
 
         override __.MetadataToken = inp.MetadataToken
 
@@ -7056,10 +7172,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         override __.ToString() = sprintf "tgt method %s(...) in type %s" inp.Name declTy.FullName
 
-        static member Make (declTy: Type) md = MethodSymbol (declTy, md) :> MethodInfo
+        static member Make (typeBuilder: ITypeBuilder) (declTy: Type) md = MethodSymbol (declTy, md, typeBuilder) :> MethodInfo
 
      /// Represents a property in an instantiated type
-    type PropertySymbol (declTy: Type, inp: PropertyInfo) =
+    type PropertySymbol (declTy: Type, inp: PropertyInfo, typeBuilder: ITypeBuilder) =
         inherit PropertyInfo()
         let gps = ((if declTy.IsGenericType then declTy.GetGenericArguments() else [| |]), [| |])
 
@@ -7068,12 +7184,12 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override __.MemberType = MemberTypes.Property
         override __.DeclaringType = declTy
 
-        override __.PropertyType = inp.PropertyType |> instType gps
-        override __.GetGetMethod(nonPublic) = inp.GetGetMethod(nonPublic) |> Option.ofObj |> Option.map (MethodSymbol.Make declTy) |> Option.toObj
-        override __.GetSetMethod(nonPublic) = inp.GetSetMethod(nonPublic) |> Option.ofObj |> Option.map (MethodSymbol.Make declTy) |> Option.toObj
-        override __.GetIndexParameters() = inp.GetIndexParameters() |> Array.map (instParameterInfo gps)
-        override __.CanRead = inp.GetGetMethod(false) |> isNull |> not
-        override __.CanWrite = inp.GetSetMethod(false) |> isNull |> not
+        override __.PropertyType = inp.PropertyType |> instType typeBuilder gps
+        override __.GetGetMethod(nonPublic) = inp.GetGetMethod(nonPublic) |> Option.ofObj |> Option.map (MethodSymbol.Make typeBuilder declTy) |> Option.toObj
+        override __.GetSetMethod(nonPublic) = inp.GetSetMethod(nonPublic) |> Option.ofObj |> Option.map (MethodSymbol.Make typeBuilder declTy) |> Option.toObj
+        override __.GetIndexParameters() = inp.GetIndexParameters() |> Array.map (instParameterInfo typeBuilder gps)
+        override __.CanRead = inp.GetGetMethod(true) |> isNull |> not
+        override __.CanWrite = inp.GetSetMethod(true) |> isNull |> not
         override __.GetCustomAttributesData() = inp.GetCustomAttributesData()
         override __.MetadataToken = inp.MetadataToken
 
@@ -7093,10 +7209,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         override __.ToString() = sprintf "tgt property %s(...) in type %s" inp.Name declTy.Name
 
-        static member Make (declTy: Type) md = PropertySymbol (declTy, md) :> PropertyInfo
+        static member Make (typeBuilder: ITypeBuilder) (declTy: Type) md = PropertySymbol (declTy, md, typeBuilder) :> PropertyInfo
 
      /// Represents an event in an instantiated type
-    type EventSymbol (declTy: Type, inp: EventInfo) =
+    type EventSymbol (declTy: Type, inp: EventInfo, typeBuilder: ITypeBuilder) =
         inherit EventInfo()
         let gps = if declTy.IsGenericType then declTy.GetGenericArguments() else [| |]
 
@@ -7105,9 +7221,9 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override __.MemberType = MemberTypes.Event
         override __.DeclaringType = declTy
 
-        override __.EventHandlerType = inp.EventHandlerType |> instType (gps, [| |])
-        override __.GetAddMethod(nonPublic) = inp.GetAddMethod(nonPublic) |> Option.ofObj |> Option.map (MethodSymbol.Make declTy) |> Option.toObj
-        override __.GetRemoveMethod(nonPublic) = inp.GetRemoveMethod(nonPublic) |> Option.ofObj |> Option.map (MethodSymbol.Make declTy) |> Option.toObj
+        override __.EventHandlerType = inp.EventHandlerType |> instType typeBuilder (gps, [| |])
+        override __.GetAddMethod(nonPublic) = inp.GetAddMethod(nonPublic) |> Option.ofObj |> Option.map (MethodSymbol.Make typeBuilder declTy) |> Option.toObj
+        override __.GetRemoveMethod(nonPublic) = inp.GetRemoveMethod(nonPublic) |> Option.ofObj |> Option.map (MethodSymbol.Make typeBuilder declTy) |> Option.toObj
         override __.GetCustomAttributesData() = inp.GetCustomAttributesData()
         override __.MetadataToken = inp.MetadataToken
 
@@ -7125,10 +7241,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         override __.ToString() = sprintf "tgt event %s(...) in type %s" inp.Name declTy.FullName
 
-        static member Make (declTy: Type) md = EventSymbol (declTy, md) :> EventInfo
+        static member Make (typeBuilder: ITypeBuilder) (declTy: Type) md = EventSymbol (declTy, md, typeBuilder) :> EventInfo
 
      /// Represents a field in an instantiated type
-    type FieldSymbol (declTy: Type, inp: FieldInfo) =
+    type FieldSymbol (declTy: Type, inp: FieldInfo, typeBuilder: ITypeBuilder) =
         inherit FieldInfo()
         let gps = if declTy.IsGenericType then declTy.GetGenericArguments() else [| |]
 
@@ -7137,7 +7253,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override __.MemberType = MemberTypes.Field
         override __.DeclaringType = declTy
 
-        override __.FieldType = inp.FieldType |> instType (gps, [| |])
+        override __.FieldType = inp.FieldType |> instType typeBuilder (gps, [| |])
         override __.GetRawConstantValue() = inp.GetRawConstantValue()
         override __.GetCustomAttributesData() = inp.GetCustomAttributesData()
         override __.MetadataToken = inp.MetadataToken
@@ -7158,7 +7274,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         override __.ToString() = sprintf "tgt literal field %s(...) in type %s" inp.Name declTy.FullName
 
-        static member Make (declTy: Type) md = FieldSymbol (declTy, md) :> FieldInfo
+        static member Make (typeBuilder: ITypeBuilder) (declTy: Type) md = FieldSymbol (declTy, md, typeBuilder) :> FieldInfo
 
     /// Represents the type constructor in a provided symbol type.
     [<RequireQualifiedAccess>]
@@ -7174,7 +7290,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
     /// Represents an array or other symbolic type involving a provided type as the argument.
     /// See the type provider spec for the methods that must be implemented.
     /// Note that the type provider specification does not require us to implement pointer-equality for provided types.
-    and TypeSymbol(kind: TypeSymbolKind, typeArgs: Type[]) as this =
+    and TypeSymbol(kind: TypeSymbolKind, typeArgs: Type[], typeBuilder: ITypeBuilder) as this =
         inherit TypeDelegator()
         do this.typeImpl <- this
 
@@ -7201,7 +7317,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             if this.IsArray then typeof<System.Array>
             elif this.IsPointer  then typeof<System.ValueType>
             elif this.IsByRef   then typeof<System.ValueType>
-            elif this.IsGenericType then instType (this.GetGenericArguments(), [| |])  (this.GetGenericTypeDefinition().BaseType)
+            elif this.IsGenericType then instType typeBuilder (this.GetGenericArguments(), [| |])  (this.GetGenericTypeDefinition().BaseType)
             else failwithf "unreachable, stack trace = %A" Environment.StackTrace
 
         override this.MetadataToken =
@@ -7232,7 +7348,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override __.GetGenericTypeDefinition() = (match kind with TypeSymbolKind.TargetGeneric e -> (e :> Type) | TypeSymbolKind.OtherGeneric gtd -> gtd | _ -> failwithf "non-generic type")
         override __.IsCOMObjectImpl() = false
         override __.HasElementTypeImpl() = (match kind with TypeSymbolKind.TargetGeneric _ | TypeSymbolKind.OtherGeneric _ -> false | _ -> true)
-        override __.GetElementType() = (match kind,typeArgs with (TypeSymbolKind.Array _  | TypeSymbolKind.SDArray | TypeSymbolKind.ByRef | TypeSymbolKind.Pointer),[| e |] -> e | _ -> failwithf "%A, %A: not an array, pointer or byref type" kind typeArgs)
+        override __.GetElementType() = (match kind, typeArgs with (TypeSymbolKind.Array _  | TypeSymbolKind.SDArray | TypeSymbolKind.ByRef | TypeSymbolKind.Pointer), [| e |] -> e | _ -> failwithf "%A, %A: not an array, pointer or byref type" kind typeArgs)
 
         override x.Module = x.Assembly.ManifestModule
 
@@ -7262,7 +7378,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 |> Array.filter (canBindConstructor bindingFlags)
             | TypeSymbolKind.OtherGeneric gtd ->
                 gtd.GetConstructors(bindingFlags)
-                |> Array.map (ConstructorSymbol.Make this)
+                |> Array.map (ConstructorSymbol.Make typeBuilder this)
             | _ -> notRequired this "GetConstructors" this.Name
 
         override this.GetMethods bindingFlags =
@@ -7274,7 +7390,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 |> Array.filter (canBindMethod bindingFlags)
             | TypeSymbolKind.OtherGeneric gtd ->
                 gtd.GetMethods(bindingFlags)
-                |> Array.map (MethodSymbol.Make this)
+                |> Array.map (MethodSymbol.Make typeBuilder this)
             | _ -> notRequired this "GetMethods" this.Name
 
         override this.GetFields bindingFlags =
@@ -7285,7 +7401,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 |> Array.filter (canBindField bindingFlags)
             | TypeSymbolKind.OtherGeneric gtd ->
                 gtd.GetFields(bindingFlags)
-                |> Array.map (FieldSymbol.Make this)
+                |> Array.map (FieldSymbol.Make typeBuilder this)
             | _ -> notRequired this "GetFields" this.Name
 
         override this.GetProperties bindingFlags =
@@ -7296,7 +7412,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 |> Array.filter (canBindProperty bindingFlags)
             | TypeSymbolKind.OtherGeneric gtd ->
                 gtd.GetProperties(bindingFlags)
-                |> Array.map (PropertySymbol.Make this)
+                |> Array.map (PropertySymbol.Make typeBuilder this)
             | _ -> notRequired this "GetProperties" this.Name
 
         override this.GetEvents bindingFlags =
@@ -7307,7 +7423,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 |> Array.filter (canBindEvent bindingFlags)
             | TypeSymbolKind.OtherGeneric gtd ->
                 gtd.GetEvents(bindingFlags)
-                |> Array.map (EventSymbol.Make this)
+                |> Array.map (EventSymbol.Make typeBuilder this)
             | _ -> notRequired this "GetEvents" this.Name
 
         override this.GetNestedTypes bindingFlags =
@@ -7321,7 +7437,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             | _ -> notRequired this "GetNestedTypes" this.Name
 
         override this.GetConstructorImpl(bindingFlags, _binderBinder, _callConvention, types, _modifiers) =
-            let ctors = this.GetConstructors(bindingFlags) |> Array.filter (fun c -> match types with null -> true | t -> c.GetParameters().Length = t.Length)
+            let ctors = this.GetConstructors(bindingFlags) |> Array.filter (fun c -> match types with null -> true | t -> let ps = c.GetParameters() in ps.Length = t.Length && (ps, t) ||> Seq.forall2 (fun p ty -> p.ParameterType = ty ) )
             match ctors with
             | [| |] -> null
             | [| ci |] -> ci
@@ -7356,7 +7472,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             | TypeSymbolKind.OtherGeneric gtd ->
                 gtd.GetFields(bindingFlags)
                 |> Array.tryFind (fun md -> md.Name = name)
-                |> Option.map (FieldSymbol.Make this)
+                |> Option.map (FieldSymbol.Make typeBuilder this)
                 |> Option.toObj
 
             | _ -> notRequired this "GetField" this.Name
@@ -7371,7 +7487,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             | TypeSymbolKind.OtherGeneric gtd ->
                 gtd.GetProperties(bindingFlags)
                 |> Array.tryFind (fun md -> md.Name = name)
-                |> Option.map (PropertySymbol.Make this)
+                |> Option.map (PropertySymbol.Make typeBuilder this)
                 |> Option.toObj
 
             | _ -> notRequired this "GetPropertyImpl" this.Name
@@ -7386,7 +7502,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             | TypeSymbolKind.OtherGeneric gtd ->
                 gtd.GetEvents(bindingFlags)
                 |> Array.tryFind (fun md -> md.Name = name)
-                |> Option.map (EventSymbol.Make this)
+                |> Option.map (EventSymbol.Make typeBuilder this)
                 |> Option.toObj
             | _ -> notRequired this "GetEvent" this.Name
 
@@ -7419,20 +7535,20 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             | TypeSymbolKind.SDArray _ -> true
             | _ -> false
 #endif
-        override this.GetMember(_name,_mt,_bindingFlags) = notRequired this "GetMember" this.Name
+        override this.GetMember(_name, _mt, _bindingFlags) = notRequired this "GetMember" this.Name
         override this.GUID = notRequired this "GUID" this.Name
         override this.InvokeMember(_name, _invokeAttr, _binder, _target, _args, _modifiers, _culture, _namedParameters) = notRequired this "InvokeMember" this.Name
-        override this.MakeArrayType() = TypeSymbol(TypeSymbolKind.SDArray, [| this |]) :> Type
-        override this.MakeArrayType arg = TypeSymbol(TypeSymbolKind.Array arg, [| this |]) :> Type
-        override this.MakePointerType() = TypeSymbol(TypeSymbolKind.Pointer, [| this |]) :> Type
-        override this.MakeByRefType() = TypeSymbol(TypeSymbolKind.ByRef, [| this |]) :> Type
+        override this.MakeArrayType() = TypeSymbol(TypeSymbolKind.SDArray, [| this |], typeBuilder) :> Type
+        override this.MakeArrayType arg = TypeSymbol(TypeSymbolKind.Array arg, [| this |], typeBuilder) :> Type
+        override this.MakePointerType() = TypeSymbol(TypeSymbolKind.Pointer, [| this |], typeBuilder) :> Type
+        override this.MakeByRefType() = TypeSymbol(TypeSymbolKind.ByRef, [| this |], typeBuilder) :> Type
 
         override this.GetEvents() = this.GetEvents(BindingFlags.Public ||| BindingFlags.Instance ||| BindingFlags.Static) // Needed because TypeDelegator.cs provides a delegting implementation of this, and we are self-delegating
         override this.ToString() = this.FullName
 
 
         /// Convert an ILGenericParameterDef read from a binary to a System.Type.
-    and TargetGenericParam (asm, gpsf, pos, inp: ILGenericParameterDef, txILType, txCustomAttributesData) as this =
+    and TargetGenericParam (asm, gpsf, pos, inp: ILGenericParameterDef, txILType, txCustomAttributesData, typeBuilder: ITypeBuilder) as this =
         inherit TypeDelegator()
         do this.typeImpl <- this
         override __.Name = inp.Name
@@ -7466,10 +7582,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override this.GetMembers(_bindingFlags) = notRequired this "GetMembers" this.Name
         override this.MakeGenericType(_args) = notRequired this "MakeGenericType" this.Name
 
-        override this.MakeArrayType() = TypeSymbol(TypeSymbolKind.SDArray, [| this |]) :> Type
-        override this.MakeArrayType arg = TypeSymbol(TypeSymbolKind.Array arg, [| this |]) :> Type
-        override this.MakePointerType() = TypeSymbol(TypeSymbolKind.Pointer, [| this |]) :> Type
-        override this.MakeByRefType() = TypeSymbol(TypeSymbolKind.ByRef, [| this |]) :> Type
+        override this.MakeArrayType() = TypeSymbol(TypeSymbolKind.SDArray, [| this |], typeBuilder) :> Type
+        override this.MakeArrayType arg = TypeSymbol(TypeSymbolKind.Array arg, [| this |], typeBuilder) :> Type
+        override this.MakePointerType() = TypeSymbol(TypeSymbolKind.Pointer, [| this |], typeBuilder) :> Type
+        override this.MakeByRefType() = TypeSymbol(TypeSymbolKind.ByRef, [| this |], typeBuilder) :> Type
 
         override __.GetAttributeFlagsImpl() = TypeAttributes.Public ||| TypeAttributes.Class ||| TypeAttributes.Sealed
 
@@ -7509,11 +7625,11 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
     /// Clones namespaces, type providers, types and members provided by tp, renaming namespace nsp1 into namespace nsp2.
 
     /// Makes a type definition read from a binary available as a System.Type. Not all methods are implemented.
-    and TargetTypeDefinition(ilGlobals: ILGlobals, tryBindAssembly: ILAssemblyRef -> Choice<Assembly,exn>, asm: TargetAssembly, declTyOpt: Type option, inp: ILTypeDef) as this =
+    and TargetTypeDefinition(ilGlobals: ILGlobals, tryBindAssembly: ILAssemblyRef -> Choice<Assembly, exn>, asm: TargetAssembly, declTyOpt: Type option, inp: ILTypeDef, typeBuilder: ITypeBuilder) as this =
         inherit TypeDelegator()
 
         // Note: For F# type providers we never need to view the custom attributes
-        let rec txCustomAttributesArg ((ty:ILType,v:obj)) =
+        let rec txCustomAttributesArg ((ty:ILType, v:obj)) =
             CustomAttributeTypedArgument(txILType ([| |], [| |]) ty, v)
 
         and txCustomAttributesDatum (inp: ILCustomAttribute) =
@@ -7617,7 +7733,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     | :? MethodInfo as that -> this.MetadataToken = that.MetadataToken && eqTypes this.DeclaringType that.DeclaringType
                     | _ -> false
 
-                override this.MakeGenericMethod(args) = MethodSymbol2(this, args) :> MethodInfo
+                override this.MakeGenericMethod(args) = MethodSymbol2(this, args, typeBuilder) :> MethodInfo
 
                 override __.MetadataToken = inp.Token
 
@@ -7745,7 +7861,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         and txILTypeRef(tref: ILTypeRef): Type =
             match tref.Scope with
             | ILTypeRefScope.Top scoref -> txScopeRef(scoref).GetType(joinILTypeName tref.Namespace tref.Name)
-            | ILTypeRefScope.Nested encl -> txILTypeRef(encl).GetNestedType(tref.Name,bindAll)
+            | ILTypeRefScope.Nested encl -> txILTypeRef(encl).GetNestedType(tref.Name, bindAll)
 
         /// Bind a reference to a constructor
         and txILConstructorRef (mref: ILMethodRef) =
@@ -7782,16 +7898,16 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             | ILType.FunctionPointer _  -> failwith "unexpected function type"
             | ILType.Ptr(arg) -> (txILType gps arg).MakePointerType()
             | ILType.Byref(arg) -> (txILType gps arg).MakeByRefType()
-            | ILType.Modified(_,_mod,arg) -> txILType gps arg
+            | ILType.Modified(_, _mod, arg) -> txILType gps arg
             | ILType.Var(n) ->
-                let (gps1:Type[]),(gps2:Type[]) = gps
+                let (gps1:Type[]), (gps2:Type[]) = gps
                 if n < gps1.Length then gps1.[n]
                 elif n < gps1.Length + gps2.Length then gps2.[n - gps1.Length]
                 else failwithf "generic parameter index out of range: %d" n
 
         /// Convert an ILGenericParameterDef read from a binary to a System.Type.
         and txILGenericParam gpsf pos (inp: ILGenericParameterDef) =
-            TargetGenericParam (asm, gpsf, pos, inp, txILType, txCustomAttributesData) :> Type
+            TargetGenericParam (asm, gpsf, pos, inp, txILType, txCustomAttributesData, typeBuilder) :> Type
 
         let rec gps = inp.GenericParams |> Array.mapi (fun i gp -> txILGenericParam (fun () -> gps, [| |]) i gp)
 
@@ -7896,11 +8012,11 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                for x in this.GetEvents(bindingFlags) do yield (x :> MemberInfo)
                for x in this.GetNestedTypes(bindingFlags) do yield (x :> MemberInfo) |]
 
-        override this.MakeGenericType(args) = TypeSymbol(TypeSymbolKind.TargetGeneric this, args) :> Type
-        override this.MakeArrayType() = TypeSymbol(TypeSymbolKind.SDArray, [| this |]) :> Type
-        override this.MakeArrayType arg = TypeSymbol(TypeSymbolKind.Array arg, [| this |]) :> Type
-        override this.MakePointerType() = TypeSymbol(TypeSymbolKind.Pointer, [| this |]) :> Type
-        override this.MakeByRefType() = TypeSymbol(TypeSymbolKind.ByRef, [| this |]) :> Type
+        override this.MakeGenericType(args) = TypeSymbol(TypeSymbolKind.TargetGeneric this, args, typeBuilder) :> Type
+        override this.MakeArrayType() = TypeSymbol(TypeSymbolKind.SDArray, [| this |], typeBuilder) :> Type
+        override this.MakeArrayType arg = TypeSymbol(TypeSymbolKind.Array arg, [| this |], typeBuilder) :> Type
+        override this.MakePointerType() = TypeSymbol(TypeSymbolKind.Pointer, [| this |], typeBuilder) :> Type
+        override this.MakeByRefType() = TypeSymbol(TypeSymbolKind.ByRef, [| this |], typeBuilder) :> Type
 
         override __.GetAttributeFlagsImpl() =
             let attr = TypeAttributes.Public ||| TypeAttributes.Class
@@ -7977,7 +8093,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override __.MetadataToken = hash location
 
     /// Implements System.Reflection.Assembly backed by .NET metadata provided by an ILModuleReader
-    and TargetAssembly(ilGlobals, tryBindAssembly: ILAssemblyRef -> Choice<Assembly,exn>, reader: ILModuleReader option, location: string) as asm =
+    and TargetAssembly(ilGlobals, tryBindAssembly: ILAssemblyRef -> Choice<Assembly, exn>, reader: ILModuleReader option, location: string, typeBuilder: ITypeBuilder) as asm =
         inherit Assembly()
 
         // A table tracking how type definition objects are translated.
@@ -8014,7 +8130,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 | USome "System", "Char" ->  typeof<char>
                 *)
                 | _ ->
-                TargetTypeDefinition(ilGlobals, tryBindAssembly, asm, declTyOpt, inp) :> System.Type)
+                TargetTypeDefinition(ilGlobals, tryBindAssembly, asm, declTyOpt, inp, typeBuilder) :> System.Type)
 
         let types = lazy [| for td in getReader().ILModuleDef.TypeDefs.Entries -> txILTypeDef None td  |]
 
@@ -8026,13 +8142,13 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override x.GetType (nm:string) =
             if nm.Contains("+") then
                 let i = nm.LastIndexOf("+")
-                let enc,nm2 = nm.[0..i-1], nm.[i+1..]
+                let enc, nm2 = nm.[0..i-1], nm.[i+1..]
                 match x.GetType(enc) with
                 | null -> null
-                | t -> t.GetNestedType(nm2,bindAll)
+                | t -> t.GetNestedType(nm2, bindAll)
             elif nm.Contains(".") then
                 let i = nm.LastIndexOf(".")
-                let nsp,nm2 = nm.[0..i-1], nm.[i+1..]
+                let nsp, nm2 = nm.[0..i-1], nm.[i+1..]
                 x.TryBindType(USome nsp, nm2) |> Option.toObj
             else
                 x.TryBindType(UNone, nm) |> Option.toObj
@@ -8047,10 +8163,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override __.ReflectionOnly = true
 
         override x.GetManifestResourceStream(resourceName:string) =
-            //let r = getReader().ILModuleDef.Resources.Entries |> Seq.find (fun r -> r.Name = resourceName)
-            //match r.Location with
-            //| ILResourceLocation.Local f -> new MemoryStream(f()) :> Stream
-            //| _ ->
+            let r = getReader().ILModuleDef.Resources.Entries |> Seq.find (fun r -> r.Name = resourceName)
+            match r.Location with
+            | ILResourceLocation.Local f -> new MemoryStream(f()) :> Stream
+            | _ ->
             notRequired x "reading manifest resource %s" resourceName
 
         member __.TxILTypeDef declTyOpt inp = txILTypeDef declTyOpt inp
@@ -8083,8 +8199,6 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             | Some res -> res
 
         override x.ToString() = "tgt assembly " + x.FullName
-
-
 
     type ProvidedAssembly(isTgt: bool, assemblyName:AssemblyName, assemblyFileName: string, customAttributesData) =
 
@@ -8122,10 +8236,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         override x.GetType (nm: string) =
             if nm.Contains("+") then
                 let i = nm.LastIndexOf("+")
-                let enc,nm2 = nm.[0..i-1], nm.[i+1..]
+                let enc, nm2 = nm.[0..i-1], nm.[i+1..]
                 match x.GetType(enc) with
                 | null -> null
-                | t -> t.GetNestedType(nm2,bindAll)
+                | t -> t.GetNestedType(nm2, bindAll)
             else
                 theTypesArray.Force()
                 |> Array.tryPick (fun ty -> if ty.FullName = nm then Some ty else None)
@@ -8189,7 +8303,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
            member x.GetProperty(nm) =
                let ty = x.GetType()
                let prop = ty.GetProperty(nm, bindAll)
-               let v = prop.GetValue(x,null)
+               let v = prop.GetValue(x, null)
                v
 
            member x.GetField(nm) =
@@ -8227,14 +8341,14 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             match genericTypeDefinition with
             | :? TargetTypeDefinition -> failwithf "unexpected target model in ProvidedTypeBuilder.MakeGenericType, stacktrace = %s " Environment.StackTrace
             | :? ProvidedTypeDefinition as ptd when ptd.BelongsToTargetModel -> failwithf "unexpected target model ptd in MakeGenericType, stacktrace = %s " Environment.StackTrace
-            | :? ProvidedTypeDefinition -> ProvidedTypeSymbol(ProvidedTypeSymbolKind.Generic genericTypeDefinition, genericArguments) :> Type
-            | _ -> TypeSymbol(TypeSymbolKind.OtherGeneric genericTypeDefinition, List.toArray genericArguments) :> Type
+            | :? ProvidedTypeDefinition -> ProvidedTypeSymbol(ProvidedTypeSymbolKind.Generic genericTypeDefinition, genericArguments, ProvidedTypeBuilder.typeBuilder) :> Type
+            | _ -> TypeSymbol(TypeSymbolKind.OtherGeneric genericTypeDefinition, List.toArray genericArguments, ProvidedTypeBuilder.typeBuilder) :> Type
 
         static member MakeGenericMethod(genericMethodDefinition, genericArguments: Type list) =
             if genericArguments.Length = 0 then genericMethodDefinition else
-            MethodSymbol2(genericMethodDefinition, Array.ofList genericArguments) :> MethodInfo
+            MethodSymbol2(genericMethodDefinition, Array.ofList genericArguments, ProvidedTypeBuilder.typeBuilder) :> MethodInfo
 
-        static member MakeTupleType(types) =
+        static member MakeTupleType(types, isStruct) =
             let rec mkTupleType isStruct (asm:Assembly) (tys:Type list) =
                 let maxTuple = 8
 
@@ -8248,7 +8362,40 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     ProvidedTypeBuilder.MakeGenericType(ty, List.append  tysA [ tyB ])
                 else
                     ProvidedTypeBuilder.MakeGenericType(ty, tys)
-            mkTupleType false (typeof<System.Tuple>.Assembly) types
+            mkTupleType isStruct (typeof<System.Tuple>.Assembly) types
+
+        static member MakeTupleType(types) = ProvidedTypeBuilder.MakeTupleType(types, false)
+
+        static member typeBuilder =
+            { new ITypeBuilder with
+                member this.MakeGenericType(typeDef: Type, args)=
+                    match typeDef with
+                    | :? ProvidedTypeDefinition -> ProvidedTypeSymbol(ProvidedTypeSymbolKind.Generic typeDef, Array.toList args, this) :> Type
+                    | _ ->
+                        if args |> Array.exists (function :? ProvidedTypeDefinition -> true | _ -> false) then
+                            TypeSymbol(TypeSymbolKind.OtherGeneric typeDef, args, this) :> Type
+                        else
+                            typeDef.MakeGenericType(args)
+                member this.MakeArrayType(typ) =
+                    match typ with
+                    | :? ProvidedTypeDefinition ->
+                        TypeSymbol(TypeSymbolKind.SDArray, [| typ |], this) :> Type
+                    | _ -> typ.MakeArrayType()
+                member this.MakeRankedArrayType(typ,rank) =
+                    match typ with
+                    | :? ProvidedTypeDefinition ->
+                        TypeSymbol(TypeSymbolKind.Array rank, [| typ |], this) :> Type
+                    | _ -> typ.MakeArrayType(rank)
+                member this.MakePointerType(typ) =
+                    match typ with
+                    | :? ProvidedTypeDefinition ->
+                        TypeSymbol(TypeSymbolKind.Pointer, [| typ |], this) :> Type
+                    | _ -> typ.MakePointerType()
+                member this.MakeByRefType(typ) =
+                    match typ with
+                    | :? ProvidedTypeDefinition ->
+                        TypeSymbol(TypeSymbolKind.ByRef, [| typ |], this) :> Type
+                    | _ -> typ.MakeByRefType()                }
 
     //--------------------------------------------------------------------------------
     // The quotation simplifier
@@ -8292,17 +8439,31 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                         let rest = List.ofSeq (Seq.skip 7 args)
                         Expr.NewObjectUnchecked(ctor, curr @ [mkCtor rest restTy])
                 let tys = [ for e in items -> e.Type ]
-                let tupleTy = ProvidedTypeBuilder.MakeTupleType(tys)
+                let tupleTy = ProvidedTypeBuilder.MakeTupleType(tys, q.Type.IsValueType)
                 simplifyExpr (mkCtor items tupleTy)
 
             // convert TupleGet to the chain of PropertyGet calls (only for generated types)
             | TupleGet(e, i) when isGenerated ->
-                let rec mkGet ty i (e: Expr)  =
-                    let pi, restOpt = Reflection.FSharpValue.PreComputeTuplePropertyInfo(ty, i)
-                    let propGet = Expr.PropertyGetUnchecked(e, pi)
-                    match restOpt with
-                    | None -> propGet
-                    | Some (restTy, restI) -> mkGet restTy restI propGet
+                let rec mkGet (ty : Type) i (e: Expr)  =
+                    if ty.IsValueType then
+                        let get index =
+                                let fields = ty.GetFields() |> Array.sortBy (fun fi -> fi.Name)
+                                if index >= fields.Length then
+                                    invalidArg "index" (sprintf "The tuple index '%d' was out of range for tuple type %s" index ty.Name)
+                                fields.[index]
+                        let tupleEncField = 7
+                        let fget = Expr.FieldGetUnchecked(e, get i)
+                        if i < tupleEncField then
+                            fget
+                        else
+                            let etys = ty.GetGenericArguments()
+                            mkGet etys.[tupleEncField] (i - tupleEncField) fget
+                    else
+                        let pi, restOpt = Reflection.FSharpValue.PreComputeTuplePropertyInfo(ty, i)
+                        let propGet = Expr.PropertyGetUnchecked(e, pi)
+                        match restOpt with
+                        | None -> propGet
+                        | Some (restTy, restI) -> mkGet restTy restI propGet
                 simplifyExpr (mkGet e.Type i (simplifyExpr e))
 #endif
 
@@ -8313,19 +8474,19 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 else q
 
             // Eliminate F# property gets to method calls
-            | PropertyGet(obj,propInfo,args) ->
+            | PropertyGet(obj, propInfo, args) ->
                 match obj with
-                | None -> simplifyExpr (Expr.CallUnchecked(propInfo.GetGetMethod(),args))
-                | Some o -> simplifyExpr (Expr.CallUnchecked(simplifyExpr o,propInfo.GetGetMethod(),args))
+                | None -> simplifyExpr (Expr.CallUnchecked(propInfo.GetGetMethod(true), args))
+                | Some o -> simplifyExpr (Expr.CallUnchecked(simplifyExpr o, propInfo.GetGetMethod(true), args))
 
             // Eliminate F# property sets to method calls
-            | PropertySet(obj,propInfo,args,v) ->
+            | PropertySet(obj, propInfo, args, v) ->
                     match obj with
-                    | None -> simplifyExpr (Expr.CallUnchecked(propInfo.GetSetMethod(),args@[v]))
-                    | Some o -> simplifyExpr (Expr.CallUnchecked(simplifyExpr o,propInfo.GetSetMethod(),args@[v]))
+                    | None -> simplifyExpr (Expr.CallUnchecked(propInfo.GetSetMethod(true), args@[v]))
+                    | Some o -> simplifyExpr (Expr.CallUnchecked(simplifyExpr o, propInfo.GetSetMethod(true), args@[v]))
 
-            // Eliminate F# function applications to FSharpFunc<_,_>.Invoke calls
-            | Application(f,e) ->
+            // Eliminate F# function applications to FSharpFunc<_, _>.Invoke calls
+            | Application(f, e) ->
                 simplifyExpr (Expr.CallUnchecked(simplifyExpr f, f.Type.GetMethod "Invoke", [ e ]) )
 
             // Eliminate F# union operations
@@ -8333,15 +8494,15 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 simplifyExpr (Expr.CallUnchecked(Reflection.FSharpValue.PreComputeUnionConstructorInfo ci, es) )
 
             // Eliminate F# union operations
-            | UnionCaseTest(e,uc) ->
+            | UnionCaseTest(e, uc) ->
                 let tagInfo = Reflection.FSharpValue.PreComputeUnionTagMemberInfo uc.DeclaringType
                 let tagExpr =
                     match tagInfo with
                     | :? PropertyInfo as tagProp ->
-                            simplifyExpr (Expr.PropertyGet(e,tagProp) )
+                            simplifyExpr (Expr.PropertyGet(e, tagProp) )
                     | :? MethodInfo as tagMeth ->
                             if tagMeth.IsStatic then simplifyExpr (Expr.Call(tagMeth, [e]))
-                            else simplifyExpr (Expr.Call(e,tagMeth,[]))
+                            else simplifyExpr (Expr.Call(e, tagMeth, []))
                     | _ -> failwith "unreachable: unexpected result from PreComputeUnionTagMemberInfo. Please report this bug to https://github.com/fsprojects/FSharp.TypeProviders.SDK/issues"
                 let tagNumber = uc.Tag
                 simplifyExpr <@@ (%%(tagExpr): int) = tagNumber @@>
@@ -8354,14 +8515,14 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             //
             // The binding must have leaves that are themselves variables (due to the limited support for byrefs in expressions)
             // therefore, we can perform inlining to translate this to a form that can be compiled
-            | Let(v,vexpr,bexpr) when v.Type.IsByRef -> transLetOfByref v vexpr bexpr
+            | Let(v, vexpr, bexpr) when v.Type.IsByRef -> transLetOfByref v vexpr bexpr
 
             // Eliminate recursive let bindings (which are unsupported by the type provider API) to regular let bindings
             | LetRecursive(bindings, expr) -> simplifyLetRec bindings expr
 
             // Handle the generic cases
-            | ShapeLambdaUnchecked(v,body) -> Expr.Lambda(v, simplifyExpr body)
-            | ShapeCombinationUnchecked(comb,args) -> RebuildShapeCombinationUnchecked(comb,List.map simplifyExpr args)
+            | ShapeLambdaUnchecked(v, body) -> Expr.Lambda(v, simplifyExpr body)
+            | ShapeCombinationUnchecked(comb, args) -> RebuildShapeCombinationUnchecked(comb, List.map simplifyExpr args)
             | ShapeVarUnchecked _ -> q
 
         and simplifyLetRec bindings expr =
@@ -8430,7 +8591,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             // Note that we must substitute our new variable dereferences into the bound expressions
             let body =
                 bindings
-                |> List.fold (fun b (v,e) -> Expr.Sequential(setRef v (e.Substitute subst), b)) refExpr
+                |> List.fold (fun b (v, e) -> Expr.Sequential(setRef v (e.Substitute subst), b)) refExpr
 
             // Something like
             //   let v1 = ref Unchecked.defaultof<t1>
@@ -8444,11 +8605,11 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         and transLetOfByref v vexpr bexpr =
             match vexpr with
-            | Sequential(e',vexpr') ->
+            | Sequential(e', vexpr') ->
                 (* let v = (e'; vexpr') in bexpr => e'; let v = vexpr' in bexpr *)
                 Expr.Sequential(e', transLetOfByref v vexpr' bexpr)
                 |> simplifyExpr
-            | IfThenElse(c,b1,b2) ->
+            | IfThenElse(c, b1, b2) ->
                 (* let v = if c then b1 else b2 in bexpr => if c then let v = b1 in bexpr else let v = b2 in bexpr *)
                 //
                 // Note, this duplicates "bexpr"
@@ -8483,8 +8644,8 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     let cases = Reflection.FSharpType.GetUnionCases(ty)
                     let a = cases.[0]
                     let b = cases.[1]
-                    if a.Name = "Empty" then a,b
-                    else b,a
+                    if a.Name = "Empty" then a, b
+                    else b, a
 
                 fun v -> transValueList (v :?> System.Collections.IEnumerable, ty, nil, cons)
             else
@@ -8717,10 +8878,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         let mkReader ref =
             try let reader = ILModuleReaderAfterReadingAllBytes(ref, ilGlobals.Force())
-                Choice1Of2(TargetAssembly(ilGlobals.Force(), this.TryBindILAssemblyRefToTgt, Some reader, ref) :> Assembly)
+                Choice1Of2(TargetAssembly(ilGlobals.Force(), this.TryBindILAssemblyRefToTgt, Some reader, ref, ProvidedTypeBuilder.typeBuilder) :> Assembly)
             with err -> Choice2Of2 err
 
-        let targetAssembliesTable_ =  ConcurrentDictionary<string,Choice<Assembly,_>>()
+        let targetAssembliesTable_ =  ConcurrentDictionary<string, Choice<Assembly, _>>()
         let targetAssemblies_ = ResizeArray<Assembly>()
         let targetAssembliesQueue = ResizeArray<_>()
         do targetAssembliesQueue.Add (fun () ->
@@ -8743,7 +8904,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             if table.ContainsKey(simpleName) then table.[simpleName]
             else Choice2Of2 (Exception(sprintf "assembly %s not found" simpleName))
 
-        let sourceAssembliesTable_ =  ConcurrentDictionary<string,Assembly>()
+        let sourceAssembliesTable_ =  ConcurrentDictionary<string, Assembly>()
         let sourceAssemblies_ = ResizeArray<_>()
         let sourceAssembliesQueue = ResizeArray<_>()
 
@@ -8814,15 +8975,15 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             else
                 asm.GetType fullName |> function null -> None | x -> Some (x, true)
 
-
+        let typeBuilder = ProvidedTypeBuilder.typeBuilder
         let rec convTypeRef toTgt (t:Type) =
             let table = (if toTgt then typeTableFwd else typeTableBwd)
             match table.TryGetValue(t) with
             | true, newT -> newT
             | false, _ ->
                 match t with
-                | :? ProvidedTypeDefinition as ptd when toTgt (* && ptd.IsErased *) ->
-                    if ptd.BelongsToTargetModel then failwithf "unexpected erased target ProvidedTypeDefinition '%O'" ptd
+                | :? ProvidedTypeDefinition as ptd when toTgt ->
+                    if ptd.IsErased && ptd.BelongsToTargetModel then failwithf "unexpected erased target ProvidedTypeDefinition '%O'" ptd
                     // recursively get the provided type.
                     convTypeDefToTgt t
 
@@ -8858,21 +9019,21 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     let genericType = t.GetGenericTypeDefinition()
                     let newT = convTypeRef toTgt genericType
                     let typeArguments = t.GetGenericArguments() |> Array.map (convType toTgt) |> Array.toList
-                    ProvidedMeasureBuilder.AnnotateType(newT, typeArguments)
+                    ProvidedMeasureBuilder.AnnotateType (newT, typeArguments)
                 elif t.IsGenericType && not t.IsGenericTypeDefinition then
                     let genericType = t.GetGenericTypeDefinition()
                     let newT = convTypeRef toTgt genericType
                     let typeArguments = t.GetGenericArguments() |> Array.map (convType toTgt)
-                    newT.MakeGenericType(typeArguments)
+                    typeBuilder.MakeGenericType(newT,typeArguments)
                 elif t.IsGenericParameter then t
                 elif t.IsArray || t.IsByRef || t.IsPointer then
                     let elemType = t.GetElementType()
                     let elemTypeT = convType toTgt elemType
                     if t.IsArray then
                         let rank = t.GetArrayRank()
-                        if rank = 1 then elemTypeT.MakeArrayType() else elemTypeT.MakeArrayType(t.GetArrayRank())
-                    elif t.IsByRef then elemTypeT.MakeByRefType()
-                    else elemTypeT.MakePointerType()
+                        if rank = 1 then typeBuilder.MakeArrayType(elemTypeT) else typeBuilder.MakeRankedArrayType(elemTypeT,t.GetArrayRank())
+                    elif t.IsByRef then typeBuilder.MakeByRefType(elemTypeT)
+                    else typeBuilder.MakePointerType(elemTypeT)
 
                 else
                     convTypeRef toTgt t
@@ -8922,7 +9083,10 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             Debug.Assert((match cons with :? ProvidedConstructor as x -> not x.BelongsToTargetModel | _ -> true), "unexpected target ProvidedConstructor")
             let declTyT = convTypeToTgt cons.DeclaringType
             let parameterTypesT = cons.GetParameters() |> Array.map (fun p -> convTypeToTgt p.ParameterType)
-            let consT = declTyT.GetConstructor(parameterTypesT)
+            let flags =
+                (if cons.IsStatic then BindingFlags.Static else BindingFlags.Instance)
+                ||| (if cons.IsPublic then BindingFlags.Public else BindingFlags.NonPublic )
+            let consT = declTyT.GetConstructor(flags, null,parameterTypesT, null )
             match consT with
             | null -> Choice1Of2 (sprintf "Constructor '%O' not found in type '%O'. This constructor may be missing in the types available in the target assemblies." cons declTyT)
             | _ ->
@@ -8985,6 +9149,8 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             | NewObject (c, exprs) ->
                 let exprsR = List.map convExprToTgt exprs
                 Expr.NewObjectUnchecked (convConstructorRefToTgt c, exprsR)
+            | DefaultValue (t) ->
+                Expr.DefaultValue (convTypeToTgt t)
             | Coerce (expr, t) ->
                 Expr.Coerce (convExprToTgt expr, convTypeToTgt t)
             | TypeTest (expr, t) ->
@@ -8997,7 +9163,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 Expr.NewArrayUnchecked (convTypeToTgt t, List.map convExprToTgt exprs)
             | NewTuple (exprs) ->
                 Expr.NewTuple (List.map convExprToTgt exprs)
-            | Lambda (v,expr) ->
+            | Lambda (v, expr) ->
                 Expr.Lambda (convVarToTgt v, convExprToTgt expr)
             | TupleGet (expr, i) ->
                 Expr.TupleGetUnchecked (convExprToTgt expr, i)
@@ -9015,25 +9181,25 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 Expr.LetUnchecked(convVarToTgt var, convExprToTgt value, convExprToTgt body)
 
             // Eliminate some F# constructs which do not cross-target well
-            | Application(f,e) ->
+            | Application(f, e) ->
                 convExprToTgt (Expr.CallUnchecked(f, f.Type.GetMethod "Invoke", [ e ]) )
             | NewUnionCase(ci, es) ->
                 convExprToTgt (Expr.CallUnchecked(Reflection.FSharpValue.PreComputeUnionConstructorInfo ci, es) )
             | NewRecord(ci, es) ->
                 convExprToTgt (Expr.NewObjectUnchecked(FSharpValue.PreComputeRecordConstructorInfo ci, es) )
-            | UnionCaseTest(e,uc) ->
+            | UnionCaseTest(e, uc) ->
                 let tagInfo = FSharpValue.PreComputeUnionTagMemberInfo uc.DeclaringType
                 let tagExpr =
                     match tagInfo with
-                    | :? PropertyInfo as tagProp -> Expr.PropertyGetUnchecked(e,tagProp)
+                    | :? PropertyInfo as tagProp -> Expr.PropertyGetUnchecked(e, tagProp)
                     | :? MethodInfo as tagMeth ->
                             if tagMeth.IsStatic then Expr.CallUnchecked(tagMeth, [e])
-                            else Expr.CallUnchecked(e,tagMeth,[])
+                            else Expr.CallUnchecked(e, tagMeth, [])
                     | _ -> failwith "unreachable: unexpected result from PreComputeUnionTagMemberInfo"
                 let tagNumber = uc.Tag
                 convExprToTgt <@@ (%%(tagExpr): int) = tagNumber @@>
 
-            | Value (obj,ty) ->
+            | Value (obj, ty) ->
                 match obj with
                 | :? Type as vty -> Expr.Value(convTypeToTgt vty, ty)
                 | _ -> Expr.Value(obj, convTypeToTgt ty)
@@ -9104,7 +9270,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             cattrs |> Array.ofSeq |> Array.choose tryConvCustomAttributeDataToTgt
 
         and convProvidedTypeDefToTgt (x: ProvidedTypeDefinition) =
-          if x.BelongsToTargetModel then failwithf "unexpected target type definition '%O'" x
+          if x.IsErased && x.BelongsToTargetModel then failwithf "unexpected target type definition '%O'" x
           match typeTableFwd.TryGetValue(x) with
           | true, newT -> (newT :?> ProvidedTypeDefinition)
           | false, _ ->
@@ -9150,7 +9316,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let getFreshMethodOverrides() =
                     let vs, idx2 = x.GetMethodOverridesFromCursor(overridesIdx)
                     overridesIdx <- idx2
-                    vs |> Array.map (fun (a,b) -> (convMethodRefToTgt a :?> ProvidedMethod), convMethodRefToTgt b)
+                    vs |> Array.map (fun (a, b) -> (convMethodRefToTgt a :?> ProvidedMethod), convMethodRefToTgt b)
 
                 let backingDataSource = Some (checkFreshMethods, getFreshMethods, getFreshInterfaces, getFreshMethodOverrides)
 
@@ -9166,7 +9332,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                                         backingDataSource,
                                         (x.GetCustomAttributesData >> convCustomAttributesDataToTgt),
                                         x.NonNullable,
-                                        x.HideObjectMethods)
+                                        x.HideObjectMethods, ProvidedTypeBuilder.typeBuilder)
 
             Debug.Assert(not (typeTableFwd.ContainsKey(x)))
             typeTableFwd.[x] <- xT
@@ -9189,7 +9355,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         and convStaticParameterDefToTgt (x: ProvidedStaticParameter) =
             Debug.Assert (not x.BelongsToTargetModel, "unexpected target ProvidedStaticParameter")
-            ProvidedStaticParameter(x.Name, convTypeToTgt x.ParameterType,  ?parameterDefaultValue=x.ParameterDefaultValue)
+            ProvidedStaticParameter(x.Name, convTypeToTgt x.ParameterType, ?parameterDefaultValue=x.ParameterDefaultValue)
 
         and convMemberDefToTgt declTyT (x: MemberInfo) =
             let xT : MemberInfo =
@@ -9222,7 +9388,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     ProvidedConstructor(true, x.Attributes,
                                         x.Parameters |> Array.map convParameterDefToTgt,
                                         convCodeToTgt (x.GetInvokeCode, x.IsStatic, true, x.Parameters, not x.IsErased),
-                                        (match x.BaseCall with None -> None | Some f -> Some (convBaseCallToTgt(f,  not x.IsErased))),
+                                        (match x.BaseCall with None -> None | Some f -> Some (convBaseCallToTgt(f, not x.IsErased))),
                                         x.IsImplicitConstructor,
                                         (x.GetCustomAttributesData >> convCustomAttributesDataToTgt)) :> _
                 | :? ProvidedMethod as x ->
@@ -9303,7 +9469,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         member this.ReadRelatedAssembly(fileName) =
             let ilg = ilGlobals.Force()
             let reader = ILModuleReaderAfterReadingAllBytes(fileName, ilg)
-            TargetAssembly(ilg, this.TryBindILAssemblyRefToTgt, Some reader, fileName) :> Assembly
+            TargetAssembly(ilg, this.TryBindILAssemblyRefToTgt, Some reader, fileName, ProvidedTypeBuilder.typeBuilder) :> Assembly
 
         member this.ReadRelatedAssembly(bytes:byte[]) =
             let fileName = "file.dll"
@@ -9313,7 +9479,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             let mdchunk = bytes.[pe.MetadataPhysLoc .. pe.MetadataPhysLoc + pe.MetadataSize - 1]
             let mdfile = ByteFile(mdchunk)
             let reader = ILModuleReader(fileName, mdfile, ilg, true)
-            TargetAssembly(ilg, this.TryBindILAssemblyRefToTgt, Some reader, fileName) :> Assembly
+            TargetAssembly(ilg, this.TryBindILAssemblyRefToTgt, Some reader, fileName, ProvidedTypeBuilder.typeBuilder) :> Assembly
 
         member __.AddSourceAssembly(asm: Assembly) =
             sourceAssembliesQueue.Add (fun () -> [| asm |])
@@ -9830,8 +9996,8 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             if idx < 0 then failwith "splitNameAt: idx < 0";
             let last = nm.Length - 1
             if idx > last then failwith "splitNameAt: idx > last";
-            (nm.Substring(0,idx)),
-            (if idx < last then nm.Substring (idx+1,last - idx) else "")
+            (nm.Substring(0, idx)),
+            (if idx < last then nm.Substring (idx+1, last - idx) else "")
 
 
         module String =
@@ -9846,19 +10012,19 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 if r = -1 then indexNotFound() else r
 
             let contains (s:string) (c:char) =
-                s.IndexOf(c,0,String.length s) <> -1
+                s.IndexOf(c, 0, String.length s) <> -1
 
         let splitTypeNameRightAux nm =
             if String.contains nm '.' then
               let idx = String.rindex nm '.'
-              let s1,s2 = splitNameAt nm idx
-              Some s1,s2
+              let s1, s2 = splitNameAt nm idx
+              Some s1, s2
             else None, nm
 
         let splitTypeNameRight nm =
             splitTypeNameRightAux nm
 
-        let GetTypeNameAsElemPair cenv (n1,n2) =
+        let GetTypeNameAsElemPair cenv (n1, n2) =
             StringE (GetStringHeapIdxOption cenv n1),
             StringE (GetStringHeapIdx cenv n2)
 
@@ -10241,12 +10407,12 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         and GetTypeDefAsPropertyMapRow cenv tidx =
             UnsharedRow
-                [| SimpleIndex (ILTableNames.TypeDef,  tidx)
+                [| SimpleIndex (ILTableNames.TypeDef, tidx)
                    SimpleIndex (ILTableNames.Property, cenv.propertyDefs.Count + 1) |]
 
         and GetTypeDefAsEventMapRow cenv tidx =
             UnsharedRow
-                [| SimpleIndex (ILTableNames.TypeDef,  tidx)
+                [| SimpleIndex (ILTableNames.TypeDef, tidx)
                    SimpleIndex (ILTableNames.Event, cenv.eventDefs.Count + 1) |]
 
         and GetKeyForFieldDef tidx (fd: ILFieldDef) =
@@ -11213,17 +11379,17 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             let labelRangeInsideLabelRange lab2pc ls1 ls2 =
                 rangeInsideRange (labelsToRange lab2pc ls1) (labelsToRange lab2pc ls2)
 
-// This file still gets used when targeting FSharp.Core 3.1.0.0, e.g. in Zanaptak.TypedCssClasses.Internal.FSharp.Data
+// This file still gets used when targeting FSharp.Core 3.1.0.0, e.g. in FSharp.Data
 #if !ABOVE_FSCORE_4_0_0_0
             let mapFold f acc (array: _[]) =
                 match array.Length with
                 | 0 -> [| |], acc
                 | len ->
-                    let f = OptimizedClosures.FSharpFunc<_,_,_>.Adapt(f)
+                    let f = OptimizedClosures.FSharpFunc<_, _, _>.Adapt(f)
                     let mutable acc = acc
                     let res = Array.zeroCreate len
                     for i = 0 to array.Length-1 do
-                        let h',s' = f.Invoke(acc,array.[i])
+                        let h', s' = f.Invoke(acc, array.[i])
                         res.[i] <- h'
                         acc <- s'
                     res, acc
@@ -11864,7 +12030,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                   cenv.resources.EmitPadding pad
                   cenv.resources.EmitInt32 resourceSize
                   cenv.resources.EmitBytes b
-                  Data (alignedOffset, true),  (ImplementationTag.File, 0)
+                  Data (alignedOffset, true), (ImplementationTag.File, 0)
               | ILResourceLocation.File (mref, offset) -> ULong offset, (ImplementationTag.File, GetModuleRefAsFileIdx cenv mref)
               | ILResourceLocation.Assembly aref -> ULong 0x0, (ImplementationTag.AssemblyRef, GetAssemblyRefAsIdx cenv aref)
             UnsharedRow
@@ -11934,7 +12100,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             Array.iter (GenTypeDefPass4 enc cenv) tds
 
 
-        let DateTime1970Jan01 = new System.DateTime(1970,1,1,0,0,0,System.DateTimeKind.Utc) (* ECMA Spec (Oct2002), Part II, 24.2.2 PE File Header. *)
+        let DateTime1970Jan01 = new System.DateTime(1970, 1, 1, 0, 0, 0, System.DateTimeKind.Utc) (* ECMA Spec (Oct2002), Part II, 24.2.2 PE File Header. *)
         let timestamp = (System.DateTime.UtcNow - DateTime1970Jan01).TotalSeconds |> int
 
         // --------------------------------------------------------------------
@@ -12050,12 +12216,12 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             let rec assoc x l =
                 match l with
                 | [] -> failwith "index not found"
-                | ((h,r)::t) -> if x = h then r else assoc x t
+                | ((h, r)::t) -> if x = h then r else assoc x t
 
             let rec memAssoc x l =
                 match l with
                 | [] -> false
-                | ((h,_)::t) -> x = h || memAssoc x t
+                | ((h, _)::t) -> x = h || memAssoc x t
 
         let TableRequiresSorting tab =
             List.memAssoc tab ILTableNames.sortedTableInfo
@@ -12090,12 +12256,12 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             //SecurityDecls=emptyILSecurityDecls;
             //HasSecurity=false;
         }
-        let mkILTypeDefForGlobalFunctions ilg (methods,fields) =
+        let mkILTypeDefForGlobalFunctions ilg (methods, fields) =
             mkILSimpleClass ilg (UNone, typeNameForGlobalFunctions, methods, fields, emptyILTypeDefs, emptyILProperties, emptyILEvents, emptyILCustomAttrs)
 
         let destTypeDefsWithGlobalFunctionsFirst ilg (tdefs: ILTypeDefs) =
           let l = tdefs.Entries
-          let top,nontop = l |> Array.partition (fun td -> td.Name = typeNameForGlobalFunctions)
+          let top, nontop = l |> Array.partition (fun td -> td.Name = typeNameForGlobalFunctions)
           let top2 = if isEmpty top then [| mkILTypeDefForGlobalFunctions ilg (emptyILMethods, emptyILFields) |] else top
           Array.append top2 nontop
 
@@ -13382,7 +13548,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         let mutable instrs =  ResizeArray<ILInstr>()
         let mutable exceptions = ResizeArray<ILExceptionSpec>()
         let mutable labelCount =  0
-        let mutable labels =  Dictionary<ILCodeLabel,int>()
+        let mutable labels =  Dictionary<ILCodeLabel, int>()
         let mutable exceptionBlocks = Stack<ILExceptionBlockBuilder>()
 
         member __.Content =
@@ -13505,7 +13671,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         let mutable dflt = UNone
         let cattrs = ResizeArray<ILCustomAttribute>()
 
-        member __.SetData(attrs2,nm2) = attrs <- attrs2; nm <- USome nm2
+        member __.SetData(attrs2, nm2) = attrs <- attrs2; nm <- USome nm2
         member __.SetConstant(obj) = dflt <- USome obj
         member __.SetCustomAttribute(ca) = cattrs.Add(ca)
 
@@ -13726,7 +13892,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                        transMethRef: MethodInfo -> ILMethodRef,
                        transCtorSpec: ConstructorInfo -> ILMethodSpec,
                        ilg: ILGenerator,
-                       localsMap:Dictionary<Var,ILLocalBuilder>,
+                       localsMap:Dictionary<Var, ILLocalBuilder>,
                        parameterVars) =
 
         // TODO: this works over FSharp.Core 4.4.0.0 types and methods. These types need to be retargeted to the target runtime.
@@ -13854,6 +14020,8 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     Some()
                 | _ -> None)
 
+        let (|TypeOf|_|) = (|SpecificCall|_|) <@ typeof<obj> @>
+
         let (|LessThan|_|) = (|SpecificCall|_|) <@ (<) @>
         let (|GreaterThan|_|) = (|SpecificCall|_|) <@ (>) @>
         let (|LessThanOrEqual|_|) = (|SpecificCall|_|) <@ (<=) @>
@@ -13939,7 +14107,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         let lessThan (a1 : Expr) (a2 : Expr) =
             match <@@ (<) @@> with
-            | DerivedPatterns.Lambdas(vars,Call(None,meth,_)) ->
+            | DerivedPatterns.Lambdas(vars, Call(None, meth, _)) ->
                 let targetType = convTypeToTgt meth.DeclaringType
                 let m = targetType.GetMethod(meth.Name, bindAll).MakeGenericMethod(a1.Type)
                 Expr.Call(m, [a1; a2])
@@ -13949,7 +14117,21 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
         let isAddress s = (s = ExpectedStackState.Address)
         let rec emitLambda(callSiteIlg: ILGenerator, v: Var, body: Expr, freeVars: seq<Var>, lambdaLocals: Dictionary<_, ILLocalBuilder>, parameters) =
             let lambda: ILTypeBuilder = assemblyMainModule.DefineType(UNone, genUniqueTypeName(), TypeAttributes.Class)
-            let baseType = convTypeToTgt (typedefof<FSharpFunc<_, _>>.MakeGenericType(v.Type, body.Type))
+
+            let fsharpFuncType = convTypeToTgt (typedefof<FSharpFunc<_, _>>)
+            let voidType = convTypeToTgt typeof<System.Void>
+            let rec lambdaType (t : Type) =
+                if t.IsGenericType then
+                    let args = t.GetGenericArguments()
+                    let gdef = t.GetGenericTypeDefinition()
+                    if args.Length = 2 && gdef.FullName = fsharpFuncType.FullName && args.[1] = voidType then
+                        gdef.MakeGenericType(lambdaType args.[0], typeof<unit>)
+                    else
+                        gdef.MakeGenericType(args |> Array.map lambdaType)
+                else
+                    t
+
+            let baseType = convTypeToTgt (lambdaType (typedefof<FSharpFunc<_, _>>.MakeGenericType(v.Type, body.Type)))
             lambda.SetParent(transType baseType)
             let baseCtor = baseType.GetConstructor(bindAll, null, [| |], null)
             if isNull baseCtor then failwithf "Couldn't find default constructor on %O" baseType
@@ -13979,10 +14161,13 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 ilg.Emit(I_stloc l.LocalIndex)
                 lambdaLocals.[v] <- l
 
-            let expectedState = if (retType = ILType.Void) then ExpectedStackState.Empty else ExpectedStackState.Value
+            let unitType = transType (convTypeToTgt (typeof<unit>))
+            let expectedState = if (retType = ILType.Void || retType.QualifiedName = unitType.QualifiedName) then ExpectedStackState.Empty else ExpectedStackState.Value
             let lambadParamVars = [| Var("this", typeof<obj>); v|]
             let codeGen = CodeGenerator(assemblyMainModule, genUniqueTypeName, implicitCtorArgsAsFields, convTypeToTgt, transType, transFieldSpec, transMeth, transMethRef, transCtorSpec, ilg, lambdaLocals, lambadParamVars)
             codeGen.EmitExpr (expectedState, body)
+            if retType.QualifiedName = unitType.QualifiedName then
+                ilg.Emit(I_ldnull)
             ilg.Emit(I_ret)
 
             callSiteIlg.Emit(I_newobj (ctor.FormalMethodSpec, None))
@@ -14095,7 +14280,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 | false, _ ->
                     failwith "unknown parameter/field"
 
-            | Coerce (arg,ty) ->
+            | Coerce (arg, ty) ->
                 // castClass may lead to observable side-effects - InvalidCastException
                 emitExpr ExpectedStackState.Value arg
                 let argTy = arg.Type
@@ -14108,6 +14293,8 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     ilg.Emit(I_castclass (transType  targetTy))
 
                 popIfEmptyExpected expectedState
+
+            | TypeOf(None, [t1], []) -> emitExpr expectedState (Expr.Value(t1))
 
             | NaN -> emitExpr ExpectedStackState.Value <@@ Double.NaN @@>
 
@@ -14334,7 +14521,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 emitExpr ExpectedStackState.Value a1
                 let maskShift (x : int) =
                     match a2 with
-                    | Patterns.Value(:? int as v ,_) ->
+                    | Patterns.Value(:? int as v , _) ->
                         emitExpr ExpectedStackState.Value (Expr.Value (v &&& x))
                     | _ ->
                         emitExpr ExpectedStackState.Value a2
@@ -14355,7 +14542,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 emitExpr ExpectedStackState.Value a1
                 let maskShift (x : int) =
                     match a2 with
-                    | Patterns.Value(:? int as v ,_) ->
+                    | Patterns.Value(:? int as v , _) ->
                         emitExpr ExpectedStackState.Value (Expr.Value (v &&& x))
                     | _ ->
                         emitExpr ExpectedStackState.Value a2
@@ -14391,7 +14578,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 | Int32 | UInt32
                 | Int64 | UInt64
                 | Int16 | UInt16
-                | SByte | Byte -> ilg.Emit(I_and)
+                | SByte | Byte -> ilg.Emit(I_or)
                 | StaticMethod "op_Or" [|t1; t1|] m ->
                     ilg.Emit(I_call(Normalcall, transMeth m, None))
                 | _ -> failwithf "Operator (|||) not supported for type %s" t1.Name
@@ -14403,7 +14590,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 | Int32 | UInt32
                 | Int64 | UInt64
                 | Int16 | UInt16
-                | SByte | Byte -> ilg.Emit(I_and)
+                | SByte | Byte -> ilg.Emit(I_xor)
                 | StaticMethod "op_Xor" [|t1; t1|] m ->
                     ilg.Emit(I_call(Normalcall, transMeth m, None))
                 | _ -> failwithf "Operator (^^^) not supported for type %s" t1.Name
@@ -14414,7 +14601,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 | Int32 | UInt32
                 | Int64 | UInt64
                 | Int16 | UInt16
-                | SByte | Byte -> ilg.Emit(I_and)
+                | SByte | Byte -> ilg.Emit(I_not)
                 | StaticMethod "op_Not" [|t1; t1|] m ->
                     ilg.Emit(I_call(Normalcall, transMeth m, None))
                 | _ -> failwithf "Operator (~~~) not supported for type %s" t1.Name
@@ -14435,7 +14622,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     ilg.Emit(I_call(Normalcall, transMeth m, None))
                     ilg.Emit(I_conv DT_R4)
                 | _ ->
-                    match a1,a2 with
+                    match a1, a2 with
                     | (Var _ | Value _), (Var _ | Value _) ->
                         Expr.IfThenElseUnchecked(lessThan a1 a2, a2, a1)
                         |> emitExpr ExpectedStackState.Value
@@ -14473,7 +14660,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     ilg.Emit(I_call(Normalcall, transMeth m, None))
                     ilg.Emit(I_conv DT_R4)
                 | _ ->
-                    match a1,a2 with
+                    match a1, a2 with
                     | (Var _ | Value _), (Var _ | Value _) ->
                         Expr.IfThenElseUnchecked(lessThan a1 a2, a1, a2)
                         |> emitExpr ExpectedStackState.Value
@@ -14668,7 +14855,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 emitExpr ExpectedStackState.Value a1
                 let rtTgt = decimalTypeTgt
                 if t1 = stringTypeTgt then
-                    let m = rtTgt.GetMethod("Parse",[|stringTypeTgt|])
+                    let m = rtTgt.GetMethod("Parse", [|stringTypeTgt|])
                     ilg.Emit(I_call(Normalcall, transMeth m, None))
                 else
                     match convertTypeTgt.GetMethod("ToDecimal", [|t1|]) with
@@ -14862,11 +15049,11 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     ilg.Emit(I_call(Normalcall, transMeth m, None))
                 | _ -> failwithf "Pow not supported for type %s" t1.Name
 
-            | FieldGet (None,field) when field.DeclaringType.IsEnum ->
+            | FieldGet (None, field) when field.DeclaringType.IsEnum ->
                 if expectedState <> ExpectedStackState.Empty then
                     emitExpr expectedState (Expr.Value(field.GetRawConstantValue(), field.FieldType.GetEnumUnderlyingType()))
 
-            | FieldGet (objOpt,field) ->
+            | FieldGet (objOpt, field) ->
                 objOpt |> Option.iter (fun e ->
                     let s = if e.Type.IsValueType then ExpectedStackState.Address else ExpectedStackState.Value
                     emitExpr s e)
@@ -14875,7 +15062,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 else
                     ilg.Emit(I_ldfld (ILAlignment.Aligned, ILVolatility.Nonvolatile, transFieldSpec field))
 
-            | FieldSet (objOpt,field,v) ->
+            | FieldSet (objOpt, field, v) ->
                 objOpt |> Option.iter (fun e ->
                     let s = if e.Type.IsValueType then ExpectedStackState.Address else ExpectedStackState.Value
                     emitExpr s e)
@@ -14885,7 +15072,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 else
                     ilg.Emit(I_stfld (ILAlignment.Aligned, ILVolatility.Nonvolatile, transFieldSpec field))
 
-            | Call (objOpt,meth,args) ->
+            | Call (objOpt, meth, args) ->
                 objOpt |> Option.iter (fun e ->
                     let s = if e.Type.IsValueType then ExpectedStackState.Address else ExpectedStackState.Value
                     emitExpr s e)
@@ -14915,12 +15102,19 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                         ilg.Emit(I_ldnull)
                 | _ -> ()
 
-            | NewObject (ctor,args) ->
+            | NewObject (ctor, args) ->
                 for pe in args do
                     emitExpr ExpectedStackState.Value pe
                 ilg.Emit(I_newobj (transCtorSpec ctor, None))
 
                 popIfEmptyExpected expectedState
+
+            | DefaultValue (t) ->
+                let ilt = transType t
+                let lb = ilg.DeclareLocal ilt
+                ilg.Emit(I_ldloca lb.LocalIndex)
+                ilg.Emit(I_initobj ilt)
+                ilg.Emit(I_ldloc lb.LocalIndex)
 
             | Value (obj, _ty) ->
                 let rec emitC (v:obj) =
@@ -14970,7 +15164,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 if isEmpty expectedState then ()
                 else emitC obj
 
-            | Let(v,e,b) ->
+            | Let(v, e, b) ->
                 let ty = transType v.Type
                 let lb = ilg.DeclareLocal ty
                 //printfn "declared local %d of original type %O and target type %O for variable %O" lb.LocalIndex v.Type ty  v
@@ -15056,7 +15250,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
                 ldres()
 
-            | VarSet(v,e) ->
+            | VarSet(v, e) ->
                 emitExpr ExpectedStackState.Value e
                 match localsMap.TryGetValue v with
                 | true, localBuilder ->
@@ -15067,6 +15261,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 let lambdaLocals = Dictionary()
                 emitLambda(ilg, v, body, expr.GetFreeVars(), lambdaLocals, parameterVars)
                 popIfEmptyExpected expectedState
+
             | n ->
                 failwithf "unknown expression '%A' in generated method" n
 
@@ -15079,8 +15274,8 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
     type AssemblyCompiler(targetAssembly: ProvidedAssembly, context: ProvidedTypesContext) =
 
 
-        let typeMap = Dictionary<ProvidedTypeDefinition,ILTypeBuilder>(HashIdentity.Reference)
-        let typeMapExtra = Dictionary<string,ILTypeBuilder>(HashIdentity.Structural)
+        let typeMap = Dictionary<ProvidedTypeDefinition, ILTypeBuilder>(HashIdentity.Reference)
+        let typeMapExtra = Dictionary<string, ILTypeBuilder>(HashIdentity.Structural)
         let ctorMap = Dictionary<ProvidedConstructor, ILMethodBuilder>(HashIdentity.Reference)
         let methMap = Dictionary<ProvidedMethod, ILMethodBuilder>(HashIdentity.Reference)
         let fieldMap = Dictionary<FieldInfo, ILFieldBuilder>(HashIdentity.Reference)
@@ -15101,7 +15296,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 Debug.Assert(pntd.BelongsToTargetModel, "expected a target ProvidedTypeDefinition in nested type")
                 // Adjust the attributes - we're codegen'ing this type as nested
                 let attributes = adjustTypeAttributes true ntd.Attributes
-                let ntb = tb.DefineNestedType(pntd.Name,attributes)
+                let ntb = tb.DefineNestedType(pntd.Name, attributes)
                 typeMap.[pntd] <- ntb
                 defineNestedTypes ntb pntd
             | _ -> ()
@@ -15197,13 +15392,13 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 | :? ProvidedTypeDefinition as pntd -> typeMembers pntd
                 | _ -> ()
 
-            for (pt,enclosingGeneratedTypeNames) in providedTypeDefinitions do
+            for (pt, enclosingGeneratedTypeNames) in providedTypeDefinitions do
                 match enclosingGeneratedTypeNames with
                 | None ->
                     typeMembers pt
                 | Some ns ->
                     let _fullName  =
-                        ("",ns) ||> List.fold (fun fullName n ->
+                        ("", ns) ||> List.fold (fun fullName n ->
                             let fullName = if fullName = "" then n else fullName + "." + n
                             f typeMapExtra.[fullName] None
                             fullName)
@@ -15222,7 +15417,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 f ca
 
         member __.Compile(isHostedExecution) =
-            let providedTypeDefinitionsT = targetAssembly.GetTheTypes() |> Array.collect (fun (tds,nsps) -> Array.map (fun td -> (td,nsps)) tds)
+            let providedTypeDefinitionsT = targetAssembly.GetTheTypes() |> Array.collect (fun (tds, nsps) -> Array.map (fun td -> (td, nsps)) tds)
             let ilg = context.ILGlobals
             let assemblyName = targetAssembly.GetName()
             let assemblyFileName = targetAssembly.Location
@@ -15234,12 +15429,12 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             let assemblyMainModule = assemblyBuilder.MainModule
 
             // Set the Assembly on the type definitions
-            for (ptdT,_) in providedTypeDefinitionsT do
+            for (ptdT, _) in providedTypeDefinitionsT do
                 if not ptdT.BelongsToTargetModel then failwithf "expected '%O' to belong to the target model" ptdT
                 ptdT.SetAssemblyInternal (K (targetAssembly :> Assembly))
 
             // phase 1 - define types
-            for (pt,enclosingGeneratedTypeNames) in providedTypeDefinitionsT do
+            for (pt, enclosingGeneratedTypeNames) in providedTypeDefinitionsT do
                 match enclosingGeneratedTypeNames with
                 | None ->
                     // Filter out the additional TypeProviderTypeAttributes flags
@@ -15252,8 +15447,8 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     defineNestedTypes tb pt
 
                 | Some ns ->
-                    let otb,_ =
-                        ((None,""),ns) ||> List.fold (fun (otb:ILTypeBuilder option,fullName) n ->
+                    let otb, _ =
+                        ((None, ""), ns) ||> List.fold (fun (otb:ILTypeBuilder option, fullName) n ->
                             let fullName = if fullName = "" then n else fullName + "." + n
                             let priorType = if typeMapExtra.ContainsKey(fullName) then Some typeMapExtra.[fullName]  else None
                             let tb =
@@ -15267,9 +15462,9 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                                     match otb with
                                     | None ->
                                         let nsp, n = splitILTypeName n
-                                        assemblyMainModule.DefineType(nsp, n,attributes)
+                                        assemblyMainModule.DefineType(nsp, n, attributes)
                                     | Some (otb:ILTypeBuilder) ->
-                                        otb.DefineNestedType(n,attributes)
+                                        otb.DefineNestedType(n, attributes)
                                 typeMapExtra.[fullName] <- tb
                                 tb
                             (Some tb, fullName))
@@ -15299,7 +15494,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                                     tb.DefineTypeInitializer()
                                 else
                                     let cb = tb.DefineConstructor(cinfo.Attributes, [| for p in cinfo.GetParameters() -> transType p.ParameterType |])
-                                    for (i,p) in cinfo.GetParameters() |> Seq.mapi (fun i x -> (i,x)) do
+                                    for (i, p) in cinfo.GetParameters() |> Seq.mapi (fun i x -> (i, x)) do
                                         cb.DefineParameter(i+1, ParameterAttributes.None, p.Name) |> ignore
                                     cb
                             ctorMap.[pcinfo] <- cb
@@ -15328,7 +15523,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                         | :? ProvidedMethod as pminfo when not (methMap.ContainsKey pminfo)  ->
                             let mb = tb.DefineMethod(minfo.Name, minfo.Attributes, transType minfo.ReturnType, [| for p in minfo.GetParameters() -> transType p.ParameterType |])
 
-                            for (i, p) in minfo.GetParameters() |> Seq.mapi (fun i x -> (i,x :?> ProvidedParameter)) do
+                            for (i, p) in minfo.GetParameters() |> Seq.mapi (fun i x -> (i, x :?> ProvidedParameter)) do
 
                                 let pb = mb.DefineParameter(i+1, p.Attributes, p.Name)
                                 if p.HasDefaultParameterValue then
@@ -15388,9 +15583,9 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                         defineCustomAttrs cb.SetCustomAttribute (pcinfo.GetCustomAttributesData())
 
                         let ilg = cb.GetILGenerator()
-                        let ctorLocals = Dictionary<Var,ILLocalBuilder>()
+                        let ctorLocals = Dictionary<Var, ILLocalBuilder>()
                         let parameterVars =
-                            [| yield Var("this",  pcinfo.DeclaringType)
+                            [| yield Var("this", pcinfo.DeclaringType)
                                for p in pcinfo.GetParameters() do
                                     yield Var(p.Name, p.ParameterType) |]
 
@@ -15405,13 +15600,13 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                             ilg.Emit(mkNormalCall (transCtorSpec cinfo))
                         | Some f ->
                             // argExprs should always include 'this'
-                            let (cinfo,argExprs) = f parameters
+                            let (cinfo, argExprs) = f parameters
                             for argExpr in argExprs do
                                 codeGen.EmitExpr (ExpectedStackState.Value, argExpr)
                             ilg.Emit(mkNormalCall (transCtorSpec cinfo))
 
                         if pcinfo.IsImplicitConstructor then
-                            for ctorArgsAsFieldIdx,ctorArgsAsField in List.mapi (fun i x -> (i,x)) implicitCtorArgsAsFields do
+                            for ctorArgsAsFieldIdx, ctorArgsAsField in List.mapi (fun i x -> (i, x)) implicitCtorArgsAsFields do
                                 ilg.Emit(I_ldarg 0)
                                 ilg.Emit(I_ldarg (ctorArgsAsFieldIdx+1))
                                 ilg.Emit(I_stfld (ILAlignment.Aligned, ILVolatility.Nonvolatile, ctorArgsAsField.FormalFieldSpec))
@@ -15442,7 +15637,6 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                       | :? ProvidedMethod as pminfo   ->
                         if not pminfo.BelongsToTargetModel then failwithf "expected '%O' to be a target ProvidedMethod. Please report this bug to https://github.com/fsprojects/FSharp.TypeProviders.SDK/issues" pminfo
                         let mb = methMap.[pminfo]
-                        let ilg = mb.GetILGenerator()
                         defineCustomAttrs mb.SetCustomAttribute (pminfo.GetCustomAttributesData())
 
                         let parameterVars =
@@ -15458,21 +15652,27 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                             failwith "The provided type definition is an interface; therefore, it should not define an implementation for its members."
                         | Some _ when pminfo.IsAbstract ->
                             failwith "The provided method is marked as an abstract method; therefore, it should not define an implementation."
-                        | None when not pminfo.IsAbstract ->
+                        | None when not (pminfo.IsAbstract || ptdT.IsAbstract ||ptdT.IsInterface)  ->
                             failwith "The provided method is not marked as an abstract method; therefore, it should define an implementation."
-                        | None -> ()
+                        | None when pminfo.IsAbstract || ptdT.IsInterface ->
+                            // abstract and interface methods have no body at all
+                            ()
+                        | None ->
+                            let ilg = mb.GetILGenerator()
+                            ilg.Emit I_ret
                         | Some invokeCode ->
+                            let ilg = mb.GetILGenerator()
                             let expr = invokeCode parameters
 
-                            let methLocals = Dictionary<Var,ILLocalBuilder>()
+                            let methLocals = Dictionary<Var, ILLocalBuilder>()
 
                             let expectedState = if (transType minfo.ReturnType = ILType.Void) then ExpectedStackState.Empty else ExpectedStackState.Value
                             let codeGen = CodeGenerator(assemblyMainModule, genUniqueTypeName, implicitCtorArgsAsFields, convTypeToTgt, transType, transFieldSpec, transMeth, transMethRef, transCtorSpec, ilg, methLocals, parameterVars)
                             codeGen.EmitExpr (expectedState, expr)
-                        ilg.Emit I_ret
+                            ilg.Emit I_ret
                       | _ -> ()
 
-                    for (bodyMethInfo,declMethInfo) in ptdT.GetMethodOverrides() do
+                    for (bodyMethInfo, declMethInfo) in ptdT.GetMethodOverrides() do
                         let bodyMethBuilder = methMap.[bodyMethInfo]
                         tb.DefineMethodOverride
                             { Overrides = OverridesSpec(transMethRef declMethInfo, transType declMethInfo.DeclaringType)
@@ -15513,7 +15713,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             // Use a real Reflection Load when running in F# Interactive
             if isHostedExecution then
                 let realTargetAssembly = Assembly.Load(bytes)
-                for (ptdT,_) in providedTypeDefinitionsT do
+                for (ptdT, _) in providedTypeDefinitionsT do
                     ptdT.SetAssemblyInternal (K realTargetAssembly)
 
             bytes
@@ -15568,7 +15768,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 //printfn "t.Assembly.Location = %O" t.Assembly.Location
                 //printfn "t.FullName = %O" t.FullName
                 //printfn "t.Assembly.GetTypes() = %A" (t.Assembly.GetTypes())
-                let tyName = t.FullName.Replace(",","\\,")
+                let tyName = t.FullName.Replace(",", "\\,")
                 let newAssembly = t.Assembly
                 let newAssemblyName = newAssembly.GetName().Name
                 let origAssemblyName = origAssembly.GetName().Name
@@ -15599,12 +15799,12 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
 
         let namespacesT = ResizeArray<IProvidedNamespace>()
 
-        do for (namespaceName,types)  in namespacesAndTypes do
+        do for (namespaceName, types)  in namespacesAndTypes do
                namespacesT.Add (makeProvidedNamespace namespaceName types)
 
-        let invalidateE = new Event<EventHandler,EventArgs>()
+        let invalidateE = new Event<EventHandler, EventArgs>()
 
-        let disposing = Event<EventHandler,EventArgs>()
+        let disposing = Event<EventHandler, EventArgs>()
 
 
 #if !FX_NO_LOCAL_FILESYSTEM
@@ -15624,7 +15824,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             let sourceAssemblies = defaultArg sourceAssemblies [ Assembly.GetCallingAssembly() ]
             let assemblyReplacementMap = defaultArg assemblyReplacementMap []
             let addDefaultProbingLocation = defaultArg addDefaultProbingLocation false
-            new TypeProviderForNamespaces(config, [(namespaceName,types)], assemblyReplacementMap=assemblyReplacementMap, sourceAssemblies=sourceAssemblies, addDefaultProbingLocation=addDefaultProbingLocation)
+            new TypeProviderForNamespaces(config, [(namespaceName, types)], assemblyReplacementMap=assemblyReplacementMap, sourceAssemblies=sourceAssemblies, addDefaultProbingLocation=addDefaultProbingLocation)
 
         new (config, ?sourceAssemblies, ?assemblyReplacementMap, ?addDefaultProbingLocation) =
             let sourceAssemblies = defaultArg sourceAssemblies [ Assembly.GetCallingAssembly() ]
@@ -15680,7 +15880,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
             namespacesT.ToArray()
 
         member this.Invalidate() =
-            invalidateE.Trigger(this,EventArgs())
+            invalidateE.Trigger(this, EventArgs())
 
         member __.GetStaticParametersForMethod(mb: MethodBase) =
             match mb with
@@ -15715,10 +15915,12 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                     match mT.GetInvokeCode with
                     | Some _ when methodBaseT.DeclaringType.IsInterface ->
                         failwith "The provided type definition is an interface; therefore, it should not define an implementation for its members."
+                    (* NOTE: These checks appear to fail for generative abstract and virtual methods.
                     | Some _ when mT.IsAbstract ->
                         failwith "The provided method is defined as abstract; therefore, it should not define an implementation."
                     | None when not mT.IsAbstract ->
                         failwith "The provided method is not defined as abstract; therefore it should define an implementation."
+                    *)
                     | Some invokeCode ->
                         let exprT = invokeCode(Array.toList parametersT)
                         check exprT
@@ -15768,7 +15970,7 @@ namespace Zanaptak.TypedCssClasses.Internal.ProviderImplementation.ProvidedTypes
                 //printfn "looking up assembly '%s'" assembly.FullName
                 let key = assembly.GetName().Name
                 match theTable.TryGetValue key with
-                | true,bytes -> bytes
+                | true, bytes -> bytes
                 | _ ->
                     let bytes =
                         match assembly with
