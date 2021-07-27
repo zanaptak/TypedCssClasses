@@ -48,6 +48,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="Fable.Core.fs" />
     <Compile Include="Types.fs" />
     <Compile Include="Utils.fs" />
     <Compile Include="CssClassesTypeProvider.fs" />
