@@ -90,56 +90,57 @@ module internal Helpers =
     let private invalidFileChars = Set.ofArray ( Path.GetInvalidFileNameChars() )
 
     let private isValidFilenameSyntax str =
-      if String.IsNullOrWhiteSpace str
-        || Seq.exists invalidPathChars.Contains str
-        || String.IsNullOrWhiteSpace( Path.GetFileName str )
-        || Seq.exists invalidFileChars.Contains ( Path.GetFileName str )
-      then false
-      else true
+        if
+            String.IsNullOrWhiteSpace str
+            || Seq.exists invalidPathChars.Contains str
+            || String.IsNullOrWhiteSpace( Path.GetFileName str )
+            || Seq.exists invalidFileChars.Contains ( Path.GetFileName str )
+        then false
+        else true
 
     let private tryGetUri fullTypeName tpInstance str =
-      try
-        match Uri.TryCreate(str, UriKind.RelativeOrAbsolute) with
-        | false, _ -> None
-        | true, uri ->
-            if isWeb uri then Some uri
-            else
-              let path = if uri.IsAbsoluteUri then pathFromFileUri uri else uri.OriginalString
-              if isValidFilenameSyntax path then Some uri else None
-      with
-      | ex ->
-          logfType fullTypeName tpInstance "tryGetUri error, assuming non file: %O" ex
-          None
+        try
+            match Uri.TryCreate(str, UriKind.RelativeOrAbsolute) with
+            | false, _ -> None
+            | true, uri ->
+                if isWeb uri then Some uri
+                else
+                    let path = if uri.IsAbsoluteUri then pathFromFileUri uri else uri.OriginalString
+                    if isValidFilenameSyntax path then Some uri else None
+        with
+        | ex ->
+            logfType fullTypeName tpInstance "tryGetUri error, assuming non file: %O" ex
+            None
 
     /// If relative file URI, resolves to absolute.
     /// Returns absolute URI and flag indicating whether it is a web URI.
     let private resolveUri resolutionFolder ( uri : Uri ) =
-      if uri.IsAbsoluteUri then
-        uri, isWeb uri
-      else
-        Uri( Path.GetFullPath( Path.Combine( resolutionFolder , uri.OriginalString ) ) , UriKind.Absolute ) , false
+        if uri.IsAbsoluteUri then
+            uri, isWeb uri
+        else
+            Uri( Path.GetFullPath( Path.Combine( resolutionFolder , uri.OriginalString ) ) , UriKind.Absolute ) , false
 
     /// Check if file exists and return absolute path if so
     let private tryFilePathExists fullTypeName tpInstance resolutionFolder path =
-      match tryGetUri fullTypeName tpInstance path with
-      | None -> None
-      | Some uri ->
-          try
-            match resolveUri resolutionFolder uri with
-            | uri , false ->
-                // non-web uri, check if exists
-                let resolvedPath = pathFromFileUri uri
-                if File.Exists resolvedPath then Some resolvedPath else None
-            | _ -> None // web uri
-          with
-          | ex ->
-              logfType fullTypeName tpInstance "resolver error, assuming non file: %A" ex
-              None // in case of any IO error on resolve or existence check
+        match tryGetUri fullTypeName tpInstance path with
+        | None -> None
+        | Some uri ->
+            try
+                match resolveUri resolutionFolder uri with
+                | uri , false ->
+                    // non-web uri, check if exists
+                    let resolvedPath = pathFromFileUri uri
+                    if File.Exists resolvedPath then Some resolvedPath else None
+                | _ -> None // web uri
+            with
+            | ex ->
+                logfType fullTypeName tpInstance "resolver error, assuming non file: %A" ex
+                None // in case of any IO error on resolve or existence check
 
     type RunCommandConfig = {
-      commandFile : string
-      argumentPrefix : string
-      argumentSuffix : string
+        commandFile : string
+        argumentPrefix : string
+        argumentSuffix : string
     }
 
     /// Reads a sample parameter for a type provider, detecting if it is a uri and fetching it if needed
@@ -155,8 +156,13 @@ module internal Helpers =
     /// * resource - when specified, we first try to treat read the sample from an embedded resource
     ///     (the value specified assembly and resource name e.g. "MyCompany.MyAssembly, some_resource.json")
     /// * resolutionFolder - if the type provider allows to override the resolutionFolder pass it here
-    let private parseTextAtDesignTime valueToBeParsedOrItsUri (tp:DisposableTypeProviderForNamespaces)
-                                      (cfg:TypeProviderConfig) resolutionFolder fullTypeName tryParseText =
+    let private parseTextAtDesignTime
+        valueToBeParsedOrItsUri
+        (tp:DisposableTypeProviderForNamespaces)
+        (cfg:TypeProviderConfig)
+        resolutionFolder
+        fullTypeName
+        tryParseText =
 
         using (logTimeType fullTypeName tp.Id "LoadTextFromSource" fullTypeName) <| fun _ ->
 
@@ -167,10 +173,11 @@ module internal Helpers =
         | None -> parseDefaultEmpty valueToBeParsedOrItsUri , []
         | Some uri ->
 
-            let resolver =
-                { ResolutionType = DesignTime
-                  DefaultResolutionFolder = cfg.ResolutionFolder
-                  ResolutionFolder = resolutionFolder }
+            let resolver = {
+                ResolutionType = DesignTime
+                DefaultResolutionFolder = cfg.ResolutionFolder
+                ResolutionFolder = resolutionFolder
+            }
 
             let readText() =
                 let reader, toWatch = asyncRead fullTypeName tp.Id resolver formatName "" uri
@@ -197,13 +204,13 @@ module internal Helpers =
             with _ ->
                 // File read failed, try as text instead, if this also fails we'll reraise the original file exception
                 let attemptedTextParseResult =
-                  if not uri.IsAbsoluteUri then
-                      logfType fullTypeName tp.Id "File read failed, attempting processing as text"
-                      try
-                        // Returns None if text parse failed to match any CSS; in that case we'll assume it was a failed file uri
-                        tryParseText valueToBeParsedOrItsUri
-                      with _ -> None
-                  else None
+                    if not uri.IsAbsoluteUri then
+                        logfType fullTypeName tp.Id "File read failed, attempting processing as text"
+                        try
+                            // Returns None if text parse failed to match any CSS; in that case we'll assume it was a failed file uri
+                            tryParseText valueToBeParsedOrItsUri
+                        with _ -> None
+                    else None
 
                 match attemptedTextParseResult with
                 | Some parseResult -> parseResult , []
@@ -218,96 +225,101 @@ module internal Helpers =
     /// * tp - the type provider
     /// * cfg - the type provider config
     /// * resolutionFolder - if the type provider allows to override the resolutionFolder pass it here
-    let private runCommandAtDesignTime source ( commandConfig : RunCommandConfig ) (tp:DisposableTypeProviderForNamespaces)
-                                      (cfg:TypeProviderConfig) resolutionFolder fullTypeName =
+    let private runCommandAtDesignTime
+        source
+        ( commandConfig : RunCommandConfig )
+        (tp:DisposableTypeProviderForNamespaces)
+        (cfg:TypeProviderConfig)
+        resolutionFolder
+        fullTypeName =
 
-      using (logTimeType fullTypeName tp.Id "RunCommand" fullTypeName) <| fun _ ->
+        using (logTimeType fullTypeName tp.Id "RunCommand" fullTypeName) <| fun _ ->
 
-      let initialFileWatchList =
-        match tryFilePathExists fullTypeName tp.Id resolutionFolder source with
-        | None -> []
-        | Some path -> [ path ]
+        let initialFileWatchList =
+            match tryFilePathExists fullTypeName tp.Id resolutionFolder source with
+            | None -> []
+            | Some path -> [ path ]
 
-      let stdoutSb = StringBuilder()
-      let stderrSb = StringBuilder()
+        let stdoutSb = StringBuilder()
+        let stderrSb = StringBuilder()
 
-      let pinfo = ProcessStartInfo( commandConfig.commandFile )
-      pinfo.UseShellExecute <- false
-      pinfo.RedirectStandardInput <- false
-      pinfo.RedirectStandardOutput <- true
-      pinfo.RedirectStandardError <- true
-      pinfo.CreateNoWindow <- true
-      pinfo.Arguments <-
-        [ commandConfig.argumentPrefix ; source ; commandConfig.argumentSuffix ]
-        |> List.filter ( fun arg -> arg <> "" )
-        |> String.concat " "
-      pinfo.WorkingDirectory <- resolutionFolder
-      logfType fullTypeName tp.Id "Process filename: %s" pinfo.FileName
-      logfType fullTypeName tp.Id "Arguments: %s" pinfo.Arguments
-      logfType fullTypeName tp.Id "Working directory: %s" pinfo.WorkingDirectory
+        let pinfo = ProcessStartInfo( commandConfig.commandFile )
+        pinfo.UseShellExecute <- false
+        pinfo.RedirectStandardInput <- false
+        pinfo.RedirectStandardOutput <- true
+        pinfo.RedirectStandardError <- true
+        pinfo.CreateNoWindow <- true
+        pinfo.Arguments <-
+            [ commandConfig.argumentPrefix ; source ; commandConfig.argumentSuffix ]
+            |> List.filter ( fun arg -> arg <> "" )
+            |> String.concat " "
+        pinfo.WorkingDirectory <- resolutionFolder
+        logfType fullTypeName tp.Id "Process filename: %s" pinfo.FileName
+        logfType fullTypeName tp.Id "Arguments: %s" pinfo.Arguments
+        logfType fullTypeName tp.Id "Working directory: %s" pinfo.WorkingDirectory
 
-      use p = new Process()
-      p.StartInfo <- pinfo
-      p.OutputDataReceived.Add( fun eventArgs ->
-        if not ( isNull eventArgs.Data ) then
-          if stdoutSb.Length = 0 then logType fullTypeName tp.Id "StandardOutput data started"
-          stdoutSb.AppendLine( eventArgs.Data ) |> ignore
-      )
-      p.ErrorDataReceived.Add( fun eventArgs ->
-        if not ( isNull eventArgs.Data ) then
-          if stderrSb.Length = 0 then logType fullTypeName tp.Id "StandardError data started"
-          stderrSb.AppendLine( eventArgs.Data ) |> ignore
-      )
+        use p = new Process()
+        p.StartInfo <- pinfo
+        p.OutputDataReceived.Add( fun eventArgs ->
+            if not ( isNull eventArgs.Data ) then
+                if stdoutSb.Length = 0 then logType fullTypeName tp.Id "StandardOutput data started"
+                stdoutSb.AppendLine( eventArgs.Data ) |> ignore
+        )
+        p.ErrorDataReceived.Add( fun eventArgs ->
+            if not ( isNull eventArgs.Data ) then
+                if stderrSb.Length = 0 then logType fullTypeName tp.Id "StandardError data started"
+                stderrSb.AppendLine( eventArgs.Data ) |> ignore
+        )
 
-      p.Start() |> ignore
-      p.BeginOutputReadLine()
-      p.BeginErrorReadLine()
-      logType fullTypeName tp.Id "Process started"
+        p.Start() |> ignore
+        p.BeginOutputReadLine()
+        p.BeginErrorReadLine()
+        logType fullTypeName tp.Id "Process started"
 
-      if p.WaitForExit( 60000 ) then
-        logType fullTypeName tp.Id "Process completed"
+        if p.WaitForExit( 60000 ) then
+            logType fullTypeName tp.Id "Process completed"
 
-        p.WaitForExit() // flush remaining output to the data receive events
+            p.WaitForExit() // flush remaining output to the data receive events
 
-        if p.ExitCode <> 0 then
-          let stderr = stderrSb.ToString()
-          failwithf "Command failed with exit code %i and stderr: %s" p.ExitCode stderr
+            if p.ExitCode <> 0 then
+                let stderr = stderrSb.ToString()
+                failwithf "Command failed with exit code %i and stderr: %s" p.ExitCode stderr
 
-        use outReader = new StringReader( stdoutSb.ToString() )
+            use outReader = new StringReader( stdoutSb.ToString() )
 
-        // Check initial lines for local files to monitor for changes
-        let rec checkLine fileWatchList =
-          if outReader.Peek() < 0 then
-            ( fileWatchList , "" )
-          else
-            let line = outReader.ReadLine()
-            if line.Length > 1000 then
-              ( fileWatchList , line )
+            // Check initial lines for local files to monitor for changes
+            let rec checkLine fileWatchList =
+                if outReader.Peek() < 0 then
+                    ( fileWatchList , "" )
+                else
+                    let line = outReader.ReadLine()
+                    if line.Length > 1000 then
+                        ( fileWatchList , line )
+                    else
+                        match tryFilePathExists fullTypeName tp.Id resolutionFolder line with
+                        | None ->
+                            ( fileWatchList , line )
+                        | Some path ->
+                            logfType fullTypeName tp.Id "Add file from command output to watch list: %s" path
+                            checkLine ( path :: fileWatchList )
+
+            let fileWatchList , firstNonFileLine = checkLine initialFileWatchList
+            let css =
+                if outReader.Peek() < 0 then firstNonFileLine
+                else firstNonFileLine + "\n" + outReader.ReadToEnd()
+
+            let maxLen = 50
+            if css.Length > maxLen then
+                logfType fullTypeName tp.Id "Output (%i of %i chars): %s" maxLen css.Length ( css.Substring( 0 , maxLen ) )
             else
-              match tryFilePathExists fullTypeName tp.Id resolutionFolder line with
-              | None ->
-                  ( fileWatchList , line )
-              | Some path ->
-                  logfType fullTypeName tp.Id "Add file from command output to watch list: %s" path
-                  checkLine ( path :: fileWatchList )
+                logfType fullTypeName tp.Id "Output: %s" css
 
-        let fileWatchList , firstNonFileLine = checkLine initialFileWatchList
-        let css =
-          if outReader.Peek() < 0 then firstNonFileLine
-          else firstNonFileLine + "\n" + outReader.ReadToEnd()
+            css , fileWatchList
 
-        let maxLen = 50
-        if css.Length > maxLen then
-          logfType fullTypeName tp.Id "Output (%i of %i chars): %s" maxLen css.Length ( css.Substring( 0 , maxLen ) )
         else
-          logfType fullTypeName tp.Id "Output: %s" css
-
-        css , fileWatchList
-
-      else
-        logType fullTypeName tp.Id "Timed out waiting for process to end"
-        try p.Kill() with ex -> logfType fullTypeName tp.Id "Error killing process: %O" ex
-        failwithf "Command timed out: %s %s" pinfo.FileName pinfo.Arguments
+            logType fullTypeName tp.Id "Timed out waiting for process to end"
+            try p.Kill() with ex -> logfType fullTypeName tp.Id "Error killing process: %O" ex
+            failwithf "Command timed out: %s %s" pinfo.FileName pinfo.Arguments
 
     let private parseResultCache : ICache< Property array * string list > = createInMemoryCache (TimeSpan.FromHours 2.)
     let private providedTypesCache = createInMemoryCache (TimeSpan.FromSeconds 30.0)
@@ -336,11 +348,11 @@ module internal Helpers =
                         let invalidateAction action path =
                             match tpref.TryGetTarget() with
                             | true, tp ->
-                              logfType fullTypeName tpInstance "File change: %s - Invalidate type: %s" path fullTypeName
-                              tp.InvalidateOneType(fullTypeName)
+                                logfType fullTypeName tpInstance "File change: %s - Invalidate type: %s" path fullTypeName
+                                tp.InvalidateOneType(fullTypeName)
                             | _ ->
-                              logfType fullTypeName tpInstance "File change: %s - No TP reference to invalidate" path
-                              ()
+                                logfType fullTypeName tpInstance "File change: %s - No TP reference to invalidate" path
+                                ()
                         Some (watchForChanges fullTypeName tpInstance files (name, invalidateAction))
                     | _ -> None
 
@@ -392,64 +404,70 @@ module internal Helpers =
             providedType
 
     // Modified version of original generateType function to process CSS and create type
-    let generateType source ( commandConfig : RunCommandConfig option )
-                      (tp:DisposableTypeProviderForNamespaces) (cfg:TypeProviderConfig)
-                      resolutionFolder fullTypeName tryParseText ( createType : Property array -> ProvidedTypeDefinition ) =
+    let generateType
+        source
+        ( commandConfig : RunCommandConfig option )
+        (tp:DisposableTypeProviderForNamespaces)
+        (cfg:TypeProviderConfig)
+        resolutionFolder
+        fullTypeName
+        tryParseText
+        ( createType : Property array -> ProvidedTypeDefinition ) =
 
         using ( logTimeType fullTypeName tp.Id "GenerateType" fullTypeName ) <| fun _ ->
 
         let cacheKey =
-          match commandConfig with
-          | Some commandConfig ->
-              let keyParts =
-                [
-                  commandConfig.commandFile
-                  ; ( [ commandConfig.argumentPrefix ; source ; commandConfig.argumentSuffix ] |> List.filter ( fun arg -> arg <> "" ) |> String.concat " " )
-                  ; resolutionFolder
-                ]
-                |> List.map ( fun s -> HttpUtility.JavaScriptStringEncode( s , true ) )
-              sprintf "Process:%s,Arguments:%s,Directory:%s" keyParts.[ 0 ] keyParts.[ 1 ] keyParts.[ 2 ]
-          | None ->
-              match tryGetUri fullTypeName tp.Id source with
-              | Some uri ->
-                  let uri , isWeb = resolveUri resolutionFolder uri
-                  if isWeb then
-                      "URI:" + HttpUtility.JavaScriptStringEncode( uri.OriginalString , true )
-                  else
-                      "File:" + HttpUtility.JavaScriptStringEncode( pathFromFileUri uri , true )
-              | None ->
-                  "Text:" + HttpUtility.JavaScriptStringEncode( source , true )
+            match commandConfig with
+            | Some commandConfig ->
+                let keyParts =
+                    [
+                        commandConfig.commandFile
+                        ; ( [ commandConfig.argumentPrefix ; source ; commandConfig.argumentSuffix ] |> List.filter ( fun arg -> arg <> "" ) |> String.concat " " )
+                        ; resolutionFolder
+                    ]
+                    |> List.map ( fun s -> HttpUtility.JavaScriptStringEncode( s , true ) )
+                sprintf "Process:%s,Arguments:%s,Directory:%s" keyParts.[ 0 ] keyParts.[ 1 ] keyParts.[ 2 ]
+            | None ->
+                match tryGetUri fullTypeName tp.Id source with
+                | Some uri ->
+                    let uri , isWeb = resolveUri resolutionFolder uri
+                    if isWeb then
+                        "URI:" + HttpUtility.JavaScriptStringEncode( uri.OriginalString , true )
+                    else
+                        "File:" + HttpUtility.JavaScriptStringEncode( pathFromFileUri uri , true )
+                | None ->
+                    "Text:" + HttpUtility.JavaScriptStringEncode( source , true )
 
         let createProvidedTypeFromData () =
 
-          let parseResult , fileWatchList =
-            match parseResultCache.TryRetrieve( cacheKey , true ) with
-            | Some propertiesAndFiles ->
-                logfType fullTypeName tp.Id "Retrieve parse result from cache, key=%s" cacheKey
-                propertiesAndFiles
-            | None ->
+            let parseResult , fileWatchList =
+                match parseResultCache.TryRetrieve( cacheKey , true ) with
+                | Some propertiesAndFiles ->
+                    logfType fullTypeName tp.Id "Retrieve parse result from cache, key=%s" cacheKey
+                    propertiesAndFiles
+                | None ->
 
-                let parsedProperties , files =
-                  match commandConfig with
-                  | Some commandConfig ->
-                      let text , files = runCommandAtDesignTime source commandConfig tp cfg resolutionFolder fullTypeName
-                      tryParseText text |> Option.defaultValue [||] , files
-                  | None -> parseTextAtDesignTime source tp cfg resolutionFolder fullTypeName tryParseText
+                    let parsedProperties , files =
+                        match commandConfig with
+                        | Some commandConfig ->
+                            let text , files = runCommandAtDesignTime source commandConfig tp cfg resolutionFolder fullTypeName
+                            tryParseText text |> Option.defaultValue [||] , files
+                        | None -> parseTextAtDesignTime source tp cfg resolutionFolder fullTypeName tryParseText
 
-                logfType fullTypeName tp.Id "Add parse result to cache, key=%s" cacheKey
-                parseResultCache.Set( cacheKey , ( parsedProperties , files )  )
+                    logfType fullTypeName tp.Id "Add parse result to cache, key=%s" cacheKey
+                    parseResultCache.Set( cacheKey , ( parsedProperties , files )  )
 
-                parsedProperties , files
+                    parsedProperties , files
 
-          logfType fullTypeName tp.Id "Parsed CSS class count: %i" parseResult.Length
+            logfType fullTypeName tp.Id "Parsed CSS class count: %i" parseResult.Length
 
-          if ( cfg.IsInvalidationSupported && not ( List.isEmpty fileWatchList ) ) then
-            tp.SetFileToWatch( fullTypeName , List.distinct fileWatchList )
+            if ( cfg.IsInvalidationSupported && not ( List.isEmpty fileWatchList ) ) then
+                tp.SetFileToWatch( fullTypeName , List.distinct fileWatchList )
 
-          createType parseResult
+            createType parseResult
 
         try
-          getOrCreateProvidedType cfg tp fullTypeName createProvidedTypeFromData cacheKey
+            getOrCreateProvidedType cfg tp fullTypeName createProvidedTypeFromData cacheKey
         with ex ->
-          logfType fullTypeName tp.Id "Error: %O" ex
-          reraise ()
+            logfType fullTypeName tp.Id "Error: %O" ex
+            reraise ()
