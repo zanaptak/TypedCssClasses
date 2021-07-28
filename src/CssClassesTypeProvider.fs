@@ -76,9 +76,13 @@ module TypeProvider =
             let nameCollisions = args.[ 4 ] :?> NameCollisions
             let fableCssModule = args.[ 11 ] :?> bool
 
-            let tryParseText value =
+            let tryParseTextClassNames value =
                 logType typeName this.Id "Parsing CSS"
-                Utils.parseCss value naming nameCollisions
+                Utils.tryParseCssClassNames value
+
+            let convertClassNamesToProperties value =
+                logType typeName this.Id "Creating properties"
+                Utils.getPropertiesFromClassNames naming nameCollisions value
 
             let createType parseResult =
                 logType typeName this.Id "Creating type"
@@ -86,7 +90,7 @@ module TypeProvider =
                 Utils.addTypeMembersFromCss fableCssModule source getProperties parseResult cssType
                 cssType
 
-            generateType source commandConfig this config finalResolutionFolder typeName tryParseText createType
+            generateType source commandConfig this config finalResolutionFolder typeName tryParseTextClassNames convertClassNamesToProperties createType
 
         let parameters = [
             ProvidedStaticParameter( "source" , typeof< string >, parameterDefaultValue = "" )

@@ -164,7 +164,7 @@ module internal Helpers =
         fullTypeName
         tryParseText =
 
-        using (logTimeType fullTypeName tp.Id "LoadTextFromSource" fullTypeName) <| fun _ ->
+        using (logTimeType fullTypeName tp.Id "ParseTextFromSource" fullTypeName) <| fun _ ->
 
         let formatName = "CSS"
         let parseDefaultEmpty x = tryParseText x |> Option.defaultValue [||]
@@ -321,7 +321,7 @@ module internal Helpers =
             try p.Kill() with ex -> logfType fullTypeName tp.Id "Error killing process: %O" ex
             failwithf "Command timed out: %s %s" pinfo.FileName pinfo.Arguments
 
-    let private parseResultCache : ICache< Property array * string list > = createInMemoryCache (TimeSpan.FromHours 2.)
+    let private parseResultCache : ICache< string array * string list > = createInMemoryCache (TimeSpan.FromHours 2.)
     let private providedTypesCache = createInMemoryCache (TimeSpan.FromSeconds 30.0)
     let private activeDisposeActions = HashSet<_>()
 
@@ -411,7 +411,8 @@ module internal Helpers =
         (cfg:TypeProviderConfig)
         resolutionFolder
         fullTypeName
-        tryParseText
+        tryParseTextClassNames
+        convertClassNamesToProperties
         ( createType : Property array -> ProvidedTypeDefinition ) =
 
         using ( logTimeType fullTypeName tp.Id "GenerateType" fullTypeName ) <| fun _ ->
@@ -442,29 +443,34 @@ module internal Helpers =
 
             let parseResult , fileWatchList =
                 match parseResultCache.TryRetrieve( cacheKey , true ) with
-                | Some propertiesAndFiles ->
+                | Some classNamesAndFiles ->
                     logfType fullTypeName tp.Id "Retrieve parse result from cache, key=%s" cacheKey
-                    propertiesAndFiles
+                    classNamesAndFiles
                 | None ->
 
-                    let parsedProperties , files =
+                    let parsedClassNames , files =
                         match commandConfig with
                         | Some commandConfig ->
                             let text , files = runCommandAtDesignTime source commandConfig tp cfg resolutionFolder fullTypeName
-                            tryParseText text |> Option.defaultValue [||] , files
-                        | None -> parseTextAtDesignTime source tp cfg resolutionFolder fullTypeName tryParseText
+                            tryParseTextClassNames text |> Option.defaultValue [||] , files
+                        | None -> parseTextAtDesignTime source tp cfg resolutionFolder fullTypeName tryParseTextClassNames
 
                     logfType fullTypeName tp.Id "Add parse result to cache, key=%s" cacheKey
-                    parseResultCache.Set( cacheKey , ( parsedProperties , files )  )
+                    parseResultCache.Set( cacheKey , ( parsedClassNames , files )  )
 
-                    parsedProperties , files
+                    parsedClassNames , files
 
             logfType fullTypeName tp.Id "Parsed CSS class count: %i" parseResult.Length
 
             if ( cfg.IsInvalidationSupported && not ( List.isEmpty fileWatchList ) ) then
                 tp.SetFileToWatch( fullTypeName , List.distinct fileWatchList )
 
-            createType parseResult
+            let parsedProperties =
+                using
+                    ( logTimeType fullTypeName tp.Id "ConvertToProperties" fullTypeName )
+                    ( fun _ -> convertClassNamesToProperties parseResult )
+
+            createType parsedProperties
 
         try
             getOrCreateProvidedType cfg tp fullTypeName createProvidedTypeFromData cacheKey

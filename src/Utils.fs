@@ -325,8 +325,7 @@ type ExtendedSuffixGenerator () =
         names |> Array.iter ( fun name -> nameSet.Add name |> ignore )
         names
 
-let getPropertiesFromCss text naming nameCollisions =
-
+let getPropertiesFromClassNames naming nameCollisions classNames =
     let transformer =
         match naming with
         | Naming.Underscores -> symbolsToUnderscores
@@ -335,11 +334,9 @@ let getPropertiesFromCss text naming nameCollisions =
         | _ -> id
 
     let initialProperties =
-        text
-        |> classNamesFromCss
-        |> Seq.map ( fun s -> { Name = transformer s ; Value = s } )
-        |> Seq.filter ( fun p -> not ( p.Name.Contains( "``" ) ) ) // impossible to represent as verbatim property name, user will have to use string value
-        |> Seq.toArray
+        classNames
+        |> Array.map ( fun s -> { Name = transformer s ; Value = s } )
+        |> Array.filter ( fun p -> not ( p.Name.Contains( "``" ) ) ) // impossible to represent as verbatim property name, user will have to use string value
 
     match nameCollisions with
 
@@ -385,7 +382,7 @@ let getPropertiesFromCss text naming nameCollisions =
             )
         Array.append sameNamesFinal differentNamesFinal
 
-let parseCss text naming nameCollisions =
+let tryParseCssClassNames text =
 
     // Remove comments
     let text = Regex.Replace( text , @"\s*/\*([^*]|\*(?!/))*\*/\s*" , "" , RegexOptions.None , TimeSpan.FromSeconds 10. )
@@ -402,8 +399,8 @@ let parseCss text naming nameCollisions =
         )
 
     if cssContainsBlock then
-        getPropertiesFromCss text naming nameCollisions
-        |> Array.sort
+        classNamesFromCss text
+        |> Seq.toArray
         |> Some
     else None
 
