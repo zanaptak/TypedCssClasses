@@ -4,17 +4,19 @@
 
 This sample illustrates the following concepts:
 
-* Using [TypedCssClasses](https://github.com/zanaptak/TypedCssClasses) for type-safe CSS class properties in a [Fable](https://fable.io/) single page application.
+- Using [TypedCssClasses](https://github.com/zanaptak/TypedCssClasses) for type-safe CSS class properties in a [Fable](https://fable.io/) single page application.
 
-* Using the [Sass](https://sass-lang.com/) CSS preprocessor to generate CSS. The sample uses Sass syntax; SCSS syntax would also work with the same setup.
+- Using the [Sass](https://sass-lang.com/) CSS preprocessor to generate CSS. The sample uses Sass syntax; SCSS syntax would also work with the same setup.
 
-* Using [Feliz](https://github.com/Zaid-Ajaj/Feliz/) for type-safe HTML.
+- Using [Feliz](https://github.com/Zaid-Ajaj/Feliz/) for type-safe HTML and React components.
 
 ## Getting started
 
 Install [.NET Core SDK](https://dotnet.microsoft.com/download).
 
 Install [Node.js](https://nodejs.org/).
+
+Run `dotnet tool restore`.
 
 Run `dotnet restore`.
 
@@ -28,7 +30,7 @@ Optionally, run `npm run build` to produce a production deployment version.
 
 * `src/App.fs`
 
-  The application code, including the view code where type-safe CSS classes are used. The application uses [Elmish](https://elmish.github.io/elmish/) architecture.
+  The application code, consisting of `App` and `Counter` React components.
 
   In the code, note the `type Css = CssClasses<...>` declaration for the TypedCssClasses type provider and the `Css`-prefixed CSS class properties.
 
@@ -42,6 +44,6 @@ Optionally, run `npm run build` to produce a production deployment version.
 
   This script is used instead of the Sass CLI in order to additionally communicate any referenced files (`_base.sass` in this case) to the type provider as files to watch for changes.
 
-* `deploy/`
+* `dist/`
 
   The folder containing the final distributable output after running `npm run build`. You can look at the `style.[some hash value].css` file to see the final generated CSS, and you can open `index.html` in the browser to run the application.

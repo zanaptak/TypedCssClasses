@@ -1,18 +1,15 @@
-const isProduction = process.env.NODE_ENV === 'production'
+const isDevelopment = process.env.WEBPACK_SERVE === 'true';
 
 const cssnano = require('cssnano')({
-  preset: ['default', {
-    discardComments: { removeAll: true }
-  }]
+    preset: ['default', {
+        discardComments: { removeAll: true }
+    }]
 })
 
 module.exports = {
-  plugins: isProduction ? [
-    require('tailwindcss')
-    , require('autoprefixer')
-    , cssnano
-  ] : [
-    require('tailwindcss')
-    , require('autoprefixer')
-  ]
-}
+    plugins: [
+        require('tailwindcss')
+        , require('autoprefixer')
+        , !isDevelopment && cssnano
+    ].filter(Boolean)
+};

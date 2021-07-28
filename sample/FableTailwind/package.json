@@ -1,32 +1,39 @@
 {
-  "private": true,
-  "scripts": {
-    "build": "cross-env NODE_ENV=production webpack -p",
-    "start": "cross-env NODE_ENV=development webpack-dev-server"
-  },
-  "dependencies": {
-    "@babel/core": "^7.11.0",
-    "@babel/preset-env": "^7.11.0",
-    "babel-loader": "^8.1.0",
-    "browserslist": "^4.13.0",
-    "caniuse-lite": "^1.0.30001109",
-    "copy-webpack-plugin": "^6.0.3",
-    "core-js": "^3.6.5",
-    "cross-env": "^7.0.2",
-    "css-loader": "^4.1.1",
-    "cssnano": "^4.1.10",
-    "fable-compiler": "^2.10.2",
-    "fable-loader": "^2.1.9",
-    "file-loader": "^6.0.0",
-    "html-webpack-plugin": "^4.3.0",
-    "mini-css-extract-plugin": "^0.9.0",
-    "postcss-loader": "^3.0.0",
-    "react": "^16.13.1",
-    "react-dom": "^16.13.1",
-    "style-loader": "^1.2.1",
-    "tailwindcss": "^1.6.0",
-    "webpack": "^4.44.1",
-    "webpack-cli": "^3.3.12",
-    "webpack-dev-server": "^3.11.0"
-  }
+    "private": true,
+    "scripts": {
+        "start": "dotnet fable watch FableTailwind.fsproj --sourceMaps --run webpack serve",
+        "build": "dotnet fable FableTailwind.fsproj --run webpack --node-env production",
+        "css": "tailwind build -i content/tailwind-source.css -o content/tailwind-generated.css",
+        "browsers": "browserslist --update-db"
+    },
+    "browserslist": [
+        "> 0.25%",
+        "not dead"
+    ],
+    "dependencies": {
+        "@babel/core": "^7.14.8",
+        "@babel/preset-env": "^7.14.8",
+        "@babel/preset-react": "^7.14.5",
+        "@pmmmwh/react-refresh-webpack-plugin": "^0.5.0-rc.2",
+        "autoprefixer": "^10.3.1",
+        "babel-loader": "^8.2.2",
+        "browserslist": "^4.16.6",
+        "copy-webpack-plugin": "^9.0.1",
+        "core-js": "^3.15.2",
+        "css-loader": "^6.2.0",
+        "cssnano": "^5.0.7",
+        "html-webpack-plugin": "^5.3.2",
+        "mini-css-extract-plugin": "^2.1.0",
+        "postcss": "^8.3.6",
+        "postcss-loader": "^6.1.1",
+        "react": "^17.0.2",
+        "react-dom": "^17.0.2",
+        "react-refresh": "^0.10.0",
+        "source-map-loader": "^3.0.0",
+        "style-loader": "^3.2.1",
+        "tailwindcss": "^2.2.7",
+        "webpack": "^5.47.0",
+        "webpack-cli": "^4.7.2",
+        "webpack-dev-server": "^4.0.0-rc.0"
+    }
 }
