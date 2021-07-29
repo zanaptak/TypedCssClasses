@@ -5,13 +5,13 @@ open Zanaptak.TypedCssClasses
 
 type css = CssClasses<"main.css", logFile="main.log">
 let view model dispatch =
-  div [] [
-    div [ Class css.mainclass ] [ str "class: " ; str (nameof css.mainclass) ]
-    Folder.view model dispatch
-    Folder.view2 model dispatch
-    Import.view model dispatch
-    Sass.view model dispatch
-  ]
+    div [] [
+        div [ Class css.mainclass ] [ str "class: " ; str (nameof css.mainclass) ]
+        Folder.view model dispatch
+        Folder.view2 model dispatch
+        Import.view model dispatch
+        Sass.view model dispatch
+    ]
 
 open Fable.Core.JsInterop
 importSideEffects "./main.css"
