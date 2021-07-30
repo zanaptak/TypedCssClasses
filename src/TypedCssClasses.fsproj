@@ -4,7 +4,7 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <DisableImplicitSystemValueTupleReference>true</DisableImplicitSystemValueTupleReference>
     <Configurations>Debug;Release;ReleaseTest</Configurations>
-    <VersionPrefix>0.4.0</VersionPrefix>
+    <VersionPrefix>1.0.0</VersionPrefix>
     <VersionSuffix></VersionSuffix>
     <PackageId>Zanaptak.TypedCssClasses</PackageId>
     <Authors>zanaptak</Authors>
@@ -14,7 +14,7 @@
     <Description>A CSS class type provider for F# web development. Bring external stylesheet classes into your F# code as design-time discoverable compiler-verified properties.</Description>
     <AssemblyName>Zanaptak.TypedCssClasses</AssemblyName>
     <PackageProjectUrl>https://github.com/zanaptak/TypedCssClasses</PackageProjectUrl>
-    <PackageReleaseNotes>https://github.com/zanaptak/TypedCssClasses/releases</PackageReleaseNotes>
+    <PackageReleaseNotes>https://github.com/zanaptak/TypedCssClasses/blob/main/CHANGELOG.md#100-2021-07-30</PackageReleaseNotes>
     <RepositoryUrl>https://github.com/zanaptak/TypedCssClasses.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <IncludeSymbols>true</IncludeSymbols>

@@ -62,6 +62,22 @@ function readProjectFileProperty {
     $propertyValue
 }
 
+function changelogTopVersionAndDate {
+
+    $topSectionVersion = ""
+    $topSectionDate = ""
+
+    foreach ( $line in ( Get-Content .\CHANGELOG.md ) ) {
+        $versionMatch = ( [ regex ] "^#+ (\d+(?:\.\d+){2,}(?:-\S+)?) \((\S+)\)" ).Match( $line )
+        if ( $versionMatch.Success ) {
+            $topSectionVersion , $topSectionDate = $versionMatch.Groups[ 1 ].Value , $versionMatch.Groups[ 2 ].Value
+            break
+        }
+    }
+
+    $topSectionVersion , $topSectionDate
+}
+
 task . Build
 
 task Clean {
@@ -136,9 +152,16 @@ task PackInternal {
     $yearStart = Get-Date -Year ( ( Get-Date ).Year ) -Month 1 -Day 1 -Hour 0 -Minute 0 -Second 0 -Millisecond 0
     $now = Get-Date
     $seconds = [ int ] ( $now - $yearStart ).TotalSeconds
-    $internalVersionPrefix = "$VersionPrefix.$seconds"
-    exec { dotnet pack ./src -c $Configuration -p:VersionPrefix=$internalVersionPrefix }
-    $internalFullVersion = combinePrefixSuffix $internalVersionPrefix $VersionSuffix
+    if ( $VersionSuffix ) {
+        $internalVersionPrefix = $VersionPrefix
+        $internalVersionSuffix = "$VersionSuffix.$seconds"
+    }
+    else {
+        $internalVersionPrefix = "$VersionPrefix.$seconds"
+        $internalVersionSuffix = $VersionSuffix
+    }
+    exec { dotnet pack ./src -c $Configuration -p:VersionPrefix=$internalVersionPrefix -p:VersionSuffix=$internalVersionSuffix }
+    $internalFullVersion = combinePrefixSuffix $internalVersionPrefix $internalVersionSuffix
     $filename = "$basePackageName.$internalFullVersion.nupkg"
     Copy-Item ./src/bin/$Configuration/$filename $LocalPackageDir
     Write-Build Green "Copied $filename to $LocalPackageDir"
@@ -158,3 +181,26 @@ task EnsureCommitted {
     $gitoutput = exec { git status -s -uall }
     if ( $gitoutput ) { throw "uncommitted changes exist in working directory" }
 }
+
+task UpdateProjectFromChangelog {
+    $version , $date = changelogTopVersionAndDate
+    if ( $version -match '-' ) {
+        $prefix , $suffix = $version -split '-'
+    }
+    else {
+        $prefix , $suffix = $version , ""
+    }
+
+    writeProjectFileProperty $mainProjectFilePath "VersionPrefix" $prefix
+    writeProjectFileProperty $mainProjectFilePath "VersionSuffix" $suffix
+
+    $anchor = ( $version -replace '\.','' ) + "-$date"
+    $url = "https://github.com/zanaptak/TypedCssClasses/blob/main/CHANGELOG.md#$anchor"
+
+    writeProjectFileProperty $mainProjectFilePath "PackageReleaseNotes" $url
+
+    Write-Build Green "****"
+    Write-Build Green "**** Assumed changelog URL (VERIFY): $url"
+    Write-Build Green "****"
+
+} , ReportProjectFileVersion
