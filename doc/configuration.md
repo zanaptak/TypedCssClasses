@@ -1,4 +1,6 @@
-# Zanaptak.TypedCssClasses configuration instructions
+# Configuration - Zanaptak.TypedCssClasses
+
+[![GitHub](https://img.shields.io/badge/-github-gray?logo=github)](https://github.com/zanaptak/TypedCssClasses) [![NuGet](https://img.shields.io/nuget/v/Zanaptak.TypedCssClasses?logo=nuget)](https://www.nuget.org/packages/Zanaptak.TypedCssClasses)
 
 ## Getting started
 
@@ -21,7 +23,7 @@ type css = CssClasses<"https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bo
 let x = css.``display-1``
 ```
 
-This capability should work with any IDE that supports type providers. (Tested on Visual Studio Code with Ionide-fsharp extension on Windows and Linux, and Visual Studio 2019 on Windows.)
+It should work with any IDE that supports type providers. (Tested in Visual Studio Code with Ionide-fsharp extension on Windows and Linux, and in Visual Studio on Windows.)
 
 ## External command support for CSS preprocessing
 
@@ -70,10 +72,6 @@ You can disable environment variable expansion by setting the `expandVariables` 
 If the `source` parameter specifies a local file, the type provider will monitor the file and refresh the CSS classes when it changes (rerunning any specified command if applicable).
 
 If a `commandFile` is specified, any leading lines from the output of the command that exactly specify a local file path will also be watched.
-
-## CSS Module support for Fable
-
-In a Fable project, CSS modules can be used
 
 ## Parameters
 

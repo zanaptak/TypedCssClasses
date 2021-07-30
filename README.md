@@ -1,4 +1,6 @@
-# Zanaptak.TypedCssClasses [![Nuget](https://img.shields.io/nuget/v/Zanaptak.TypedCssClasses)](https://www.nuget.org/packages/Zanaptak.TypedCssClasses/)
+# Zanaptak.TypedCssClasses
+
+[![GitHub](https://img.shields.io/badge/-github-gray?logo=github)](https://github.com/zanaptak/TypedCssClasses) [![NuGet](https://img.shields.io/nuget/v/Zanaptak.TypedCssClasses?logo=nuget)](https://www.nuget.org/packages/Zanaptak.TypedCssClasses)
 
 A CSS class type provider for F# web development.
 
@@ -67,9 +69,9 @@ div [ ClassName <| String.concat " " [
 
 Preconfigured sample projects to see it in action and use as a starting point:
 
-- [Fable Sass sample](https://github.com/zanaptak/TypedCssClasses/tree/master/sample/FableSass) - Demonstrates TypedCssClasses with Sass compilation in a Fable project.
+- [Fable Sass sample](https://github.com/zanaptak/TypedCssClasses/tree/main/sample/FableSass) - Demonstrates TypedCssClasses with Sass compilation in a Fable project.
 
-- [Fable Tailwind sample](https://github.com/zanaptak/TypedCssClasses/tree/master/sample/FableTailwind) - Demonstrates TypedCssClasses with Tailwind CSS in a Fable project.
+- [Fable Tailwind sample](https://github.com/zanaptak/TypedCssClasses/tree/main/sample/FableTailwind) - Demonstrates TypedCssClasses with Tailwind CSS in a Fable project.
 
 ## Getting started
 
@@ -92,9 +94,11 @@ type css = CssClasses<"https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bo
 let x = css.``display-1``
 ```
 
+It should work with any IDE that supports type providers. (Tested in Visual Studio Code with Ionide-fsharp extension on Windows and Linux, and in Visual Studio on Windows.)
+
 ## Configuration
 
-See the [configuration instructions](doc/configuration.md) for full details on configuration parameters to customize the behavior of the type provider.
+See the [configuration instructions](https://github.com/zanaptak/TypedCssClasses/blob/main/doc/configuration.md) for full details on configuration parameters to customize the behavior of the type provider.
 
 ## Notes
 
@@ -104,4 +108,4 @@ Web URLs are expected to use static CDN or otherwise unchanging content and are 
 
 If using Fable 2.x, update fable-compiler to version 2.3.17 or later to avoid an issue with the type provider failing to resolve relative file paths.
 
-CSS `@import` rules are not processed internally by the type provider. If desired, they can be processed via external command; see the [TestWithFable test project](https://github.com/zanaptak/TypedCssClasses/tree/master/test/TestWithFable) for an example using [PostCSS](https://postcss.org/) with the [postcss-import](https://github.com/postcss/postcss-import) plugin.
+CSS `@import` rules are not processed internally by the type provider. If desired, they can be processed via external command; see the [TestWithFable test project](https://github.com/zanaptak/TypedCssClasses/tree/main/test/TestWithFable) for an example using [PostCSS](https://postcss.org/) with the [postcss-import](https://github.com/postcss/postcss-import) plugin.

@@ -10,8 +10,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		..\.editorconfig = ..\.editorconfig
 		..\.gitattributes = ..\.gitattributes
 		..\.gitignore = ..\.gitignore
+		..\CHANGELOG.md = ..\CHANGELOG.md
 		..\invoke.build.ps1 = ..\invoke.build.ps1
 		..\README.md = ..\README.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "doc", "doc", "{149E8767-E720-444B-BC61-C64C8510D37A}"
+	ProjectSection(SolutionItems) = preProject
+		..\doc\configuration.md = ..\doc\configuration.md
 	EndProjectSection
 EndProject
 Global
@@ -30,6 +36,9 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{149E8767-E720-444B-BC61-C64C8510D37A} = {CF019DE1-D98F-40B5-A1D4-FC4BE9AC74B6}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {5CDB4F14-36E1-489C-B4F3-E9E8B8E027F4}
